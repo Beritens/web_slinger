@@ -2,12 +2,13 @@ use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::{
-    App, Camera, Camera2d, Commands, Component, Entity, GlobalTransform, Query, Single, Transform,
-    Vec2, Vec3, Window, With, World,
+    App, ButtonInput, Camera, Camera2d, Commands, Component, Entity, GlobalTransform, MouseButton,
+    Query, Res, Single, Transform, Update, Vec2, Vec3, Window, With, Without, World,
 };
 use bevy::sprite::Sprite;
 use bevy::window::PrimaryWindow;
 use bevy::DefaultPlugins;
+use std::process::id;
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 struct SubStepSchedule;
@@ -16,6 +17,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins);
     app.add_systems(Startup, setup);
+    app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
     app.add_systems(FixedUpdate, (follow_mouse_system, run_sub_steps));
     app.add_systems(
         SubStepSchedule,
@@ -24,7 +26,8 @@ fn main() {
             apply_constraints,
             update_verlet_position,
             stick_constraints,
-            collision_system,
+            static_collision_system, // collision_system,
+            mouse_constraint_system,
         ),
     );
     app.run();
@@ -36,59 +39,89 @@ fn run_sub_steps(world: &mut World) {
     }
 }
 
+#[derive(Component)]
+struct Player;
+
+#[derive(Component)]
+struct RopeHolder {
+    hand: Entity,
+}
+
 fn setup(mut commands: Commands) {
     commands.spawn((Camera2d));
     let mut last_ent: Option<Entity> = None;
 
     let p = Vec2::new(-50.0, 0.0);
-    let first_ent = commands.spawn((
+    let hand = commands.spawn((
         Transform::from_xyz(-50.0, 0.0, 0.0),
+        RopeShooter {
+            delete_old: true,
+            connections: vec![],
+        },
         Collider {
             radius: 2.0,
             layer: 2,
             layer_mask: 1,
         },
         VerletObject {
-            fixed: true,
+            fixed: false,
             position_old: p,
             position_current: p,
             acceleration: Vec2::ZERO,
         },
         Sprite::from_color(Color::WHITE, Vec2::splat(8.0)),
-        MouseFollower,
     ));
-    let first_ent_id = first_ent.id();
-    last_ent = Some(first_ent_id);
-    for i in 1..=100 {
-        let pos: Vec2 = Vec2::new(-50.0 + (i as f32) * 4., 0.);
-        let new = commands.spawn((
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            Collider {
-                radius: 2.0,
-                layer: 2,
-                layer_mask: 1,
-            },
-            VerletObject {
-                fixed: false,
-                position_old: pos,
-                position_current: pos,
-                acceleration: Vec2::ZERO,
-            },
-            Sprite::from_color(Color::WHITE, Vec2::splat(4.0)),
-        ));
-        let new_ent = new.id();
-        if let Some(last) = last_ent {
-            commands.spawn(
-                (Stick {
-                    ent1: new_ent,
-                    ent2: last,
-                    length: 4.0,
-                    ratio: if i <= 1 { 1.0 } else { 0.5 },
-                }),
-            );
-        }
-        last_ent = Some(new_ent);
-    }
+    let hand_ent = hand.id();
+
+    let p2 = Vec2::new(0.0, 0.0);
+    commands.spawn((
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        Collider {
+            radius: 8.0,
+            layer: 2,
+            layer_mask: 1,
+        },
+        RopeHolder { hand: hand_ent },
+        VerletObject {
+            fixed: false,
+            position_old: p2,
+            position_current: p2,
+            acceleration: Vec2::ZERO,
+        },
+        Sprite::from_color(Color::WHITE, Vec2::splat(16.0)),
+    ));
+    // let first_ent_id = first_ent.id();
+    // last_ent = Some(first_ent_id);
+    // for i in 1..=100 {
+    //     let pos: Vec2 = Vec2::new(-50.0 + (i as f32) * 4., 0.);
+    //     let new = commands.spawn((
+    //         Transform::from_xyz(0.0, 0.0, 0.0),
+    //         Collider {
+    //             radius: 2.0,
+    //             layer: 2,
+    //             layer_mask: 1,
+    //         },
+    //         VerletObject {
+    //             fixed: false,
+    //             position_old: pos,
+    //             position_current: pos,
+    //             acceleration: Vec2::ZERO,
+    //         },
+    //         Sprite::from_color(Color::WHITE, Vec2::splat(4.0)),
+    //     ));
+    //     let new_ent = new.id();
+    //     if let Some(last) = last_ent {
+    //         commands.spawn(
+    //             (Stick {
+    //                 ent1: new_ent,
+    //                 ent2: last,
+    //                 length: 4.0,
+    //                 ratio: if i <= 1 { 1.0 } else { 0.5 },
+    //             }),
+    //         );
+    //     }
+    //     last_ent = Some(new_ent);
+    // }
 
     commands.spawn((
         VerletObject {
@@ -99,6 +132,7 @@ fn setup(mut commands: Commands) {
         },
         Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
         Transform::from_xyz(0.0, 0.0, -5.0),
+        StaticCollider,
         Collider {
             radius: 25.0,
             layer: 1,
@@ -115,6 +149,7 @@ fn setup(mut commands: Commands) {
         },
         Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
         Transform::from_xyz(0.0, 0.0, -5.0),
+        StaticCollider,
         Collider {
             radius: 25.0,
             layer: 1,
@@ -145,11 +180,13 @@ struct Stick {
     ent1: Entity,
     ent2: Entity,
     length: f32,
-    ratio: f32,
 }
 
 #[derive(Component)]
 struct MouseFollower;
+
+#[derive(Component)]
+struct StaticCollider;
 
 #[derive(Component)]
 struct Collider {
@@ -203,8 +240,14 @@ fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut 
         if let Ok([mut obj1, mut obj2]) = verlet_query.get_many_mut([stick.ent1, stick.ent2]) {
             let diff = obj2.position_current - obj1.position_current;
             let err = diff.length() - stick.length;
-            obj1.position_current += diff.normalize() * err * stick.ratio;
-            obj2.position_current -= diff.normalize() * err * (1.0 - stick.ratio);
+
+            let ma = if obj1.fixed { 0.0 } else { 1.0 };
+            let mb = if obj2.fixed { 0.0 } else { 1.0 };
+            if (ma + mb <= 0.0) {
+                continue;
+            }
+            obj1.position_current += diff.normalize() * err * (ma / (ma + mb));
+            obj2.position_current -= diff.normalize() * err * (mb / (ma + mb));
         }
     }
 }
@@ -233,6 +276,22 @@ fn follow_mouse_system(
     }
 }
 
+fn static_collision_system(
+    mut collider_query: Query<(&Collider, &mut VerletObject), Without<StaticCollider>>,
+    static_collider_query: Query<(&Collider, &VerletObject), With<StaticCollider>>,
+) {
+    for (collider_a, mut verlet_object_a) in collider_query.iter_mut() {
+        for (collider_b, verlet_object_b) in static_collider_query.iter() {
+            let diff = verlet_object_b.position_current - verlet_object_a.position_current;
+            let max = collider_a.radius + collider_b.radius;
+            let norm = diff.normalize();
+            let err = diff.length() - max;
+            if (err < 0.0) {
+                verlet_object_a.position_current += norm * err;
+            }
+        }
+    }
+}
 fn collision_system(mut collider_query: Query<(&Collider, &mut VerletObject)>) {
     let mut combinations = collider_query.iter_combinations_mut();
     while let Some([(collider_a, mut verlet_object_a), (collider_b, mut verlet_object_b)]) =
@@ -257,7 +316,166 @@ fn collision_system(mut collider_query: Query<(&Collider, &mut VerletObject)>) {
             verlet_object_b.position_current -= norm * err * mb / (ma + mb);
         }
     }
-    // for (collider_a, mut verlet_object_a) in collider_query.iter_mut() {
-    //     for (collider_b, mut verlet_object_b) in collider_query.iter_mut() {}
-    // }
+}
+
+#[derive(Component)]
+struct RopeSpawner {
+    start: Vec2,
+    end: Vec2,
+    attached_start: Option<Entity>,
+    start_length: f32,
+    attached_end: Option<Entity>,
+    end_length: f32,
+    end_fixed: bool,
+    shooter: Entity,
+}
+
+fn spawn_rope_system(
+    mut commands: Commands,
+    spawner_query: Query<(&RopeSpawner, Entity)>,
+    mut shooter_query: Query<&mut RopeShooter>,
+) {
+    for (rope_spawner, entity) in spawner_query.iter() {
+        let diff = rope_spawner.end - rope_spawner.start;
+        let count = (diff.length() / 4.0) as i32;
+
+        let mut last_ent = rope_spawner.attached_start;
+        let mut last_pos = rope_spawner.start;
+
+        for i in 1..=count {
+            let percent = i as f32 / count as f32;
+            let pos = rope_spawner.start.clone().lerp(rope_spawner.end, percent);
+            let new = commands.spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                Collider {
+                    radius: 2.0,
+                    layer: 1,
+                    layer_mask: 1,
+                },
+                VerletObject {
+                    fixed: i == count && rope_spawner.end_fixed,
+                    position_old: pos,
+                    position_current: pos,
+                    acceleration: Vec2::ZERO,
+                },
+                Sprite::from_color(Color::WHITE, Vec2::splat(4.0)),
+            ));
+            let new_ent = new.id();
+            if let Some(last) = last_ent {
+                let stick = commands.spawn(
+                    (Stick {
+                        ent1: new_ent,
+                        ent2: last,
+                        length: (pos - last_pos).length() * 0.9,
+                    }),
+                );
+                let stick_ent = stick.id();
+                if (i == 1) {
+                    if let Ok(mut shooter) = shooter_query.get_mut(rope_spawner.shooter) {
+                        shooter.connections.push(stick_ent);
+                    }
+                }
+            }
+            last_ent = Some(new_ent);
+            last_pos = pos;
+        }
+        if let (Some(end_entity), Some(last_ent)) = (rope_spawner.attached_end, last_ent) {
+            commands.spawn(
+                (Stick {
+                    ent1: end_entity,
+                    ent2: last_ent,
+                    length: rope_spawner.end_length,
+                }),
+            );
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+#[derive(Component)]
+struct RopeShooter {
+    delete_old: bool,
+    connections: Vec<Entity>,
+}
+
+fn shoot_rope_system(
+    mut commands: Commands,
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+    windows: Query<&Window>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut player_query: Query<(&VerletObject, &mut RopeShooter, Entity)>,
+) {
+    if (!buttons.just_pressed(MouseButton::Left)) {
+        return;
+    }
+    let (camera, camera_transform) = *camera_query;
+
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor_position) = window.cursor_position() else {
+        return;
+    };
+
+    // Calculate a world position based on the cursor's position.
+    let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else {
+        return;
+    };
+    for (verlet_object, mut shooter, entity) in player_query.iter_mut() {
+        for con in shooter.connections.iter() {
+            commands.entity(*con).despawn();
+        }
+        shooter.connections.clear();
+        commands.spawn(
+            (RopeSpawner {
+                start: verlet_object.position_current,
+                end: point,
+                attached_start: Some(entity),
+                start_length: 0.5,
+                attached_end: None,
+                end_length: 0.0,
+                end_fixed: true,
+                shooter: entity,
+            }),
+        );
+    }
+}
+
+fn mouse_constraint_system(
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+    windows: Query<&Window>,
+    player_query: Query<(&RopeHolder, Entity)>,
+    mut verlet_object_query: Query<&mut VerletObject>,
+) {
+    let (camera, camera_transform) = *camera_query;
+
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor_position) = window.cursor_position() else {
+        return;
+    };
+
+    // Calculate a world position based on the cursor's position.
+    let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else {
+        return;
+    };
+
+    for (rope_holer, entity) in player_query.iter() {
+        if let Ok([mut obj1, mut obj2]) =
+            verlet_object_query.get_many_mut([entity, rope_holer.hand])
+        {
+            let ideal_pos =
+                obj1.position_current + 50.0 * (point - obj1.position_current).normalize();
+            // let ideal_pos = obj1.position_current - Vec2::Y * 50.0;
+            let diff = ideal_pos - obj2.position_current;
+
+            obj2.position_current += diff * 0.95;
+
+            obj1.position_current -= diff * 0.05;
+            // obj2.position_current += diff / 2.0;
+        }
+    }
 }

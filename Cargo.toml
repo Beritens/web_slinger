@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15.2"
+
+[profile.release]
+opt-level = 3
