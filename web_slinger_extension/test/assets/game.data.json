@@ -1,0 +1,226 @@
+{
+  "shop_items": [
+    {
+      "name": "Knockback",
+      "shop_displays": [
+        {
+          "cost": 10,
+          "text": "more knockback"
+        },
+        {
+          "cost": 50,
+          "text": "even more knockback"
+        },
+        {
+          "cost": 500,
+          "text": "enemies be flying"
+        },
+        {
+          "cost": 1000,
+          "text": "too much knockback"
+        },
+        {
+          "cost": 10000,
+          "text": "if you want this much knockback, consider playing smash instead"
+        },
+        {
+          "cost": -1,
+          "text": "Enough"
+        }
+      ]
+    },
+    {
+      "name": "Damage",
+      "shop_displays": [
+        {
+          "cost": 10,
+          "text": "more damage"
+        },
+        {
+          "cost": 50,
+          "text": "MORE damage!"
+        },
+        {
+          "cost": 500,
+          "text": "I said MOOOORE damage!"
+        },
+        {
+          "cost": 1000,
+          "text": "LOOK AT ALL THIS DAMAGE"
+        },
+        {
+          "cost": 10000,
+          "text": "EMOTIONAL DAMAGE"
+        },
+        {
+          "cost": -1,
+          "text": "this is the limit"
+        }
+      ]
+    },
+    {
+      "name": "Speed",
+      "shop_displays": [
+        {
+          "cost": 1,
+          "text": "be able to move"
+        },
+        {
+          "cost": 10,
+          "text": "faster"
+        },
+        {
+          "cost": 50,
+          "text": "GAS GAS GAS"
+        },
+        {
+          "cost": 500,
+          "text": "Flash"
+        },
+        {
+          "cost": 1000,
+          "text": "SANIC"
+        },
+        {
+          "cost": 10000,
+          "text": "The problem of being faster than light is that you only live in darkness"
+        },
+        {
+          "cost": -1,
+          "text": "nothing is faster than c"
+        }
+      ]
+    },
+    {
+      "name": "Arise Cooldown",
+      "shop_displays": [
+        {
+          "cost": 10,
+          "text": "quicker"
+        },
+        {
+          "cost": 100,
+          "text": "even quicker"
+        },
+        {
+          "cost": 500,
+          "text": "solo leveling"
+        },
+        {
+          "cost": 1000,
+          "text": "SPAMMING"
+        },
+        {
+          "cost": -1,
+          "text": "what more do you want?"
+        }
+      ]
+    },
+    {
+      "name": "Arise Count",
+      "shop_displays": [
+        {
+          "cost": 10,
+          "text": "more"
+        },
+        {
+          "cost": 50,
+          "text": "even more skelly bois"
+        },
+        {
+          "cost": 500,
+          "text": "I need an army"
+        },
+        {
+          "cost": 1000,
+          "text": "an army is not eneough"
+        },
+        {
+          "cost": 10000,
+          "text": "INFINITE"
+        },
+        {
+          "cost": -1,
+          "text": "..."
+        }
+      ]
+    },
+    {
+      "name": "Attack Cooldown",
+      "shop_displays": [
+        {
+          "cost": 10,
+          "text": "more dps"
+        },
+        {
+          "cost": 50,
+          "text": "no more waiting"
+        },
+        {
+          "cost": 500,
+          "text": "can you even click this fast?"
+        },
+        {
+          "cost": 1000,
+          "text": "SOYMILK"
+        },
+        {
+          "cost": 10000,
+          "text": "no way you can remotely click this fast"
+        },
+        {
+          "cost": -1,
+          "text": "just learn to click faster"
+        }
+      ]
+    }
+  ],
+  "knockback": [
+    2.0,
+    4.0,
+    8.0,
+    10.0,
+    15.0,
+    20.0
+  ],
+  "damage": [
+    1.0,
+    2.0,
+    4.0,
+    10.0,
+    20.0,
+    30.0
+  ],
+  "speed": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    10.0
+  ],
+  "arise_cooldown": [
+    10.0,
+    5.0,
+    2.0,
+    1.0,
+    0.0
+  ],
+  "arise_count": [
+    1,
+    2,
+    5,
+    10,
+    200,
+    1000
+  ],
+  "attack_cooldown": [
+    1.0,
+    0.5,
+    0.25,
+    0.125,
+    0.06,
+    0.0
+  ]
+}

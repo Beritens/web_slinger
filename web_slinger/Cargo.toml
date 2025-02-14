@@ -1,0 +1,10 @@
+[package]
+name = "web_slinger"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.15.2"
+
+[profile.release]
+opt-level = 3
