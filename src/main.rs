@@ -44,6 +44,7 @@ struct Player;
 
 #[derive(Component)]
 struct RopeHolder {
+    last_pos: Vec2,
     hand: Entity,
 }
 
@@ -73,7 +74,6 @@ fn setup(mut commands: Commands) {
     ));
     let hand_ent = hand.id();
 
-    let p2 = Vec2::new(0.0, 0.0);
     commands.spawn((
         Transform::from_xyz(0.0, 0.0, 0.0),
         Collider {
@@ -81,11 +81,14 @@ fn setup(mut commands: Commands) {
             layer: 2,
             layer_mask: 1,
         },
-        RopeHolder { hand: hand_ent },
+        RopeHolder {
+            hand: hand_ent,
+            last_pos: Vec2::new(0.0, 0.0),
+        },
         VerletObject {
             fixed: false,
-            position_old: p2,
-            position_current: p2,
+            position_old: p,
+            position_current: p,
             acceleration: Vec2::ZERO,
         },
         Sprite::from_color(Color::WHITE, Vec2::splat(16.0)),
@@ -228,10 +231,13 @@ fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
     const origin: Vec2 = Vec2::ZERO;
     const radius: f32 = 350.0;
     for (mut verlet_object) in verlet_query.iter_mut() {
-        let dirr = verlet_object.position_current - origin;
-        if (dirr.length() > radius) {
-            verlet_object.position_current = origin + dirr.normalize() * radius;
+        if (verlet_object.position_current.y < -400.0) {
+            verlet_object.position_current.y = -400.0;
         }
+        // let dirr = verlet_object.position_current - origin;
+        // if (dirr.length() > radius) {
+        //     verlet_object.position_current = origin + dirr.normalize() * radius;
+        // }
     }
 }
 
@@ -337,7 +343,7 @@ fn spawn_rope_system(
 ) {
     for (rope_spawner, entity) in spawner_query.iter() {
         let diff = rope_spawner.end - rope_spawner.start;
-        let count = (diff.length() / 4.0) as i32;
+        let count = (diff.length() / 8.0) as i32;
 
         let mut last_ent = rope_spawner.attached_start;
         let mut last_pos = rope_spawner.start;
@@ -348,7 +354,7 @@ fn spawn_rope_system(
             let new = commands.spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 Collider {
-                    radius: 2.0,
+                    radius: 4.0,
                     layer: 1,
                     layer_mask: 1,
                 },
@@ -405,7 +411,16 @@ fn shoot_rope_system(
     buttons: Res<ButtonInput<MouseButton>>,
     mut player_query: Query<(&VerletObject, &mut RopeShooter, Entity)>,
 ) {
-    if (!buttons.just_pressed(MouseButton::Left)) {
+    let mut clear = false;
+    let mut shoot = false;
+    if (buttons.just_released(MouseButton::Left)) {
+        clear = true;
+    }
+    if (buttons.just_pressed(MouseButton::Left)) {
+        clear = true;
+        shoot = true;
+    }
+    if (!clear && !shoot) {
         return;
     }
     let (camera, camera_transform) = *camera_query;
@@ -414,7 +429,11 @@ fn shoot_rope_system(
         return;
     };
 
-    let Some(cursor_position) = window.cursor_position() else {
+    let cursor_position = if let Some(pos) = window.cursor_position() {
+        pos
+    } else if !shoot {
+        Vec2::ZERO
+    } else {
         return;
     };
 
@@ -423,29 +442,33 @@ fn shoot_rope_system(
         return;
     };
     for (verlet_object, mut shooter, entity) in player_query.iter_mut() {
-        for con in shooter.connections.iter() {
-            commands.entity(*con).despawn();
+        if (clear) {
+            for con in shooter.connections.iter() {
+                commands.entity(*con).despawn();
+            }
+            shooter.connections.clear();
         }
-        shooter.connections.clear();
-        commands.spawn(
-            (RopeSpawner {
-                start: verlet_object.position_current,
-                end: point,
-                attached_start: Some(entity),
-                start_length: 0.5,
-                attached_end: None,
-                end_length: 0.0,
-                end_fixed: true,
-                shooter: entity,
-            }),
-        );
+        if (shoot) {
+            commands.spawn(
+                (RopeSpawner {
+                    start: verlet_object.position_current,
+                    end: point,
+                    attached_start: Some(entity),
+                    start_length: 0.5,
+                    attached_end: None,
+                    end_length: 0.0,
+                    end_fixed: true,
+                    shooter: entity,
+                }),
+            );
+        }
     }
 }
 
 fn mouse_constraint_system(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
-    player_query: Query<(&RopeHolder, Entity)>,
+    mut player_query: Query<(&mut RopeHolder, Entity)>,
     mut verlet_object_query: Query<&mut VerletObject>,
 ) {
     let (camera, camera_transform) = *camera_query;
@@ -454,27 +477,45 @@ fn mouse_constraint_system(
         return;
     };
 
-    let Some(cursor_position) = window.cursor_position() else {
-        return;
-    };
+    let cursor_position = window.cursor_position();
 
     // Calculate a world position based on the cursor's position.
-    let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else {
-        return;
-    };
+    let point =
+        cursor_position.and_then(|pos| camera.viewport_to_world_2d(camera_transform, pos).ok());
 
-    for (rope_holer, entity) in player_query.iter() {
+    for (mut rope_holer, entity) in player_query.iter_mut() {
         if let Ok([mut obj1, mut obj2]) =
             verlet_object_query.get_many_mut([entity, rope_holer.hand])
         {
-            let ideal_pos =
-                obj1.position_current + 50.0 * (point - obj1.position_current).normalize();
+            let mouse_pos = point.unwrap_or(rope_holer.last_pos);
+            let diff_obj2 = (mouse_pos - obj2.position_current);
+            // let target_position = obj1.position_current - diff_obj2;
+            // let diff_to_target = target_position - obj1.position_current;
+            let length = diff_obj2.length().min(64.0);
+            let ideal_pos = obj1.position_current + diff_obj2.normalize() * length;
             // let ideal_pos = obj1.position_current - Vec2::Y * 50.0;
             let diff = ideal_pos - obj2.position_current;
+            if (diff.length() == 0.0) {
+                continue;
+            }
+            let diff_norm = diff.clone().normalize();
 
-            obj2.position_current += diff * 0.95;
+            obj2.position_current += diff_norm * diff.length().min(0.5) * 0.95;
 
-            obj1.position_current -= diff * 0.05;
+            obj1.position_current -= diff_norm * diff.length().min(0.5) * 0.05;
+
+            let hand_diff = obj2.position_current - obj1.position_current;
+            let hand_diff_norm = hand_diff.clone().normalize();
+            let err = 64.0 - hand_diff.length();
+            if (err < 0.0) {
+                obj1.position_current -= hand_diff_norm * err * 0.05;
+                obj2.position_current += hand_diff_norm * err * 0.95;
+            }
+            rope_holer.last_pos = mouse_pos;
+
+            if (obj1.position_current.is_nan()) {
+                println!("nan");
+            }
             // obj2.position_current += diff / 2.0;
         }
     }
