@@ -17,7 +17,6 @@ struct SubStepSchedule;
 
 fn main() {
     let mut app = App::new();
-    app.insert_resource(ClearColor(Color::NONE));
     app.add_plugins(DefaultPlugins);
     app.add_systems(Startup, setup);
     app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
@@ -72,6 +71,8 @@ fn setup(mut commands: Commands) {
             position_old: p,
             position_current: p,
             acceleration: Vec2::ZERO,
+            friction: 0.5,
+            ..default()
         },
         Sprite::from_color(Color::WHITE, Vec2::splat(8.0)),
     ));
@@ -93,6 +94,7 @@ fn setup(mut commands: Commands) {
             position_old: p,
             position_current: p,
             acceleration: Vec2::ZERO,
+            ..default()
         },
         Sprite::from_color(Color::WHITE, Vec2::splat(16.0)),
     ));
@@ -135,6 +137,7 @@ fn setup(mut commands: Commands) {
             position_old: Default::default(),
             acceleration: Default::default(),
             fixed: true,
+            ..default()
         },
         Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
         Transform::from_xyz(0.0, 0.0, -5.0),
@@ -152,6 +155,7 @@ fn setup(mut commands: Commands) {
             position_old: Default::default(),
             acceleration: Default::default(),
             fixed: true,
+            ..default()
         },
         Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
         Transform::from_xyz(0.0, 0.0, -5.0),
@@ -173,6 +177,21 @@ struct VerletObject {
     position_old: Vec2,
     acceleration: Vec2,
     fixed: bool,
+    drag: f32,
+    friction: f32,
+}
+
+impl Default for VerletObject {
+    fn default() -> Self {
+        return VerletObject {
+            position_current: Vec2::ZERO,
+            position_old: Vec2::ZERO,
+            acceleration: Vec2::ZERO,
+            fixed: false,
+            drag: 0.001,
+            friction: 0.01,
+        };
+    }
 }
 
 impl Verlet for VerletObject {
@@ -211,7 +230,8 @@ fn update_verlet_position(mut verlet_query: Query<(&mut VerletObject, &mut Trans
             );
             continue;
         }
-        let vel = verlet_object.position_current - verlet_object.position_old;
+        let vel = (verlet_object.position_current - verlet_object.position_old)
+            * (1.0 - verlet_object.drag);
         verlet_object.position_old = verlet_object.position_current;
         verlet_object.position_current =
             verlet_object.position_old + vel + verlet_object.acceleration;
@@ -235,6 +255,9 @@ fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
     const radius: f32 = 350.0;
     for (mut verlet_object) in verlet_query.iter_mut() {
         if (verlet_object.position_current.y < -400.0) {
+            let normal = Vec2::Y;
+
+            apply_friction(normal, &mut verlet_object);
             verlet_object.position_current.y = -400.0;
         }
         // let dirr = verlet_object.position_current - origin;
@@ -242,6 +265,14 @@ fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
         //     verlet_object.position_current = origin + dirr.normalize() * radius;
         // }
     }
+}
+
+fn apply_friction(normal: Vec2, verlet_object: &mut VerletObject) -> Vec2 {
+    let vel = verlet_object.position_current - verlet_object.position_old;
+    let vel_n = normal * normal.dot(vel);
+    let vel_t = vel - vel_n;
+    verlet_object.position_current -= vel_t * verlet_object.friction;
+    return vel_t;
 }
 
 fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut VerletObject>) {
@@ -296,6 +327,8 @@ fn static_collision_system(
             let norm = diff.normalize();
             let err = diff.length() - max;
             if (err < 0.0) {
+                apply_friction(norm, &mut verlet_object_a);
+
                 verlet_object_a.position_current += norm * err;
             }
         }
@@ -366,6 +399,7 @@ fn spawn_rope_system(
                     position_old: pos,
                     position_current: pos,
                     acceleration: Vec2::ZERO,
+                    ..default()
                 },
                 Sprite::from_color(Color::WHITE, Vec2::splat(4.0)),
             ));
