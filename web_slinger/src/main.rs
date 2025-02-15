@@ -10,6 +10,7 @@ use bevy::sprite::Sprite;
 use bevy::utils::default;
 use bevy::window::{CompositeAlphaMode, PrimaryWindow, WindowLevel, WindowPlugin};
 use bevy::DefaultPlugins;
+use bevy_wasm_window_resize::WindowResizePlugin;
 use std::process::id;
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
@@ -17,8 +18,17 @@ struct SubStepSchedule;
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins);
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            #[cfg(target_arch = "wasm32")]
+            canvas: Some("#bevy".into()),
+            ..default()
+        }),
+        ..default()
+    }));
     app.add_systems(Startup, setup);
+    app.add_plugins(WindowResizePlugin);
+    app.insert_resource(ClearColor(Color::NONE));
     app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
     app.add_systems(FixedUpdate, (follow_mouse_system, run_sub_steps));
     app.add_systems(
@@ -74,7 +84,7 @@ fn setup(mut commands: Commands) {
             friction: 0.5,
             ..default()
         },
-        Sprite::from_color(Color::WHITE, Vec2::splat(8.0)),
+        Sprite::from_color(Color::BLACK, Vec2::splat(8.0)),
     ));
     let hand_ent = hand.id();
 
@@ -96,7 +106,7 @@ fn setup(mut commands: Commands) {
             acceleration: Vec2::ZERO,
             ..default()
         },
-        Sprite::from_color(Color::WHITE, Vec2::splat(16.0)),
+        Sprite::from_color(Color::BLACK, Vec2::splat(16.0)),
     ));
     // let first_ent_id = first_ent.id();
     // last_ent = Some(first_ent_id);
@@ -401,7 +411,7 @@ fn spawn_rope_system(
                     acceleration: Vec2::ZERO,
                     ..default()
                 },
-                Sprite::from_color(Color::WHITE, Vec2::splat(4.0)),
+                Sprite::from_color(Color::BLACK, Vec2::splat(4.0)),
             ));
             let new_ent = new.id();
             if let Some(last) = last_ent {

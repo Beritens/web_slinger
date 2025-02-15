@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15.2"
+bevy_wasm_window_resize = { git = "https://github.com/Leinnan/bevy_wasm_window_resize.git" }
+wasm-bindgen = "0.2.100"
 
 [profile.release]
 opt-level = 3

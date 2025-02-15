@@ -1183,6 +1183,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_wasm_window_resize"
+version = "0.5.0"
+source = "git+https://github.com/Leinnan/bevy_wasm_window_resize.git#d144fe33c0a52e1c18942487a9bc8ff99e7dab20"
+dependencies = [
+ "bevy",
+ "web-sys",
+]
+
+[[package]]
 name = "bevy_window"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4110,6 +4119,8 @@ name = "web_slinger"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_wasm_window_resize",
+ "wasm-bindgen",
 ]
 
 [[package]]
