@@ -1,3 +1,10 @@
+mod collider_import;
+mod physics;
+
+use crate::collider_import::CollisionImportPlugin;
+use crate::physics::{
+    Collider, PhysicsPlugin, Shape, StaticCollider, Stick, SubStepSchedule, VerletObject,
+};
 use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -13,10 +20,8 @@ use bevy::DefaultPlugins;
 use bevy_wasm_window_resize::WindowResizePlugin;
 use std::process::id;
 
-#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-struct SubStepSchedule;
-
 fn main() {
+    println!("Web_Slinger activated");
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -28,27 +33,14 @@ fn main() {
     }));
     app.add_systems(Startup, setup);
     app.add_plugins(WindowResizePlugin);
-    app.insert_resource(ClearColor(Color::NONE));
-    app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
-    app.add_systems(FixedUpdate, (follow_mouse_system, run_sub_steps));
-    app.add_systems(
-        SubStepSchedule,
-        (
-            apply_gravity,
-            apply_constraints,
-            update_verlet_position,
-            stick_constraints,
-            static_collision_system, // collision_system,
-            mouse_constraint_system,
-        ),
-    );
-    app.run();
-}
+    app.add_plugins(CollisionImportPlugin);
+    app.add_plugins(PhysicsPlugin);
 
-fn run_sub_steps(world: &mut World) {
-    for i in 0..8 {
-        world.run_schedule(SubStepSchedule);
-    }
+    #[cfg(target_arch = "wasm32")]
+    app.insert_resource(ClearColor(Color::NONE));
+    app.add_systems(FixedUpdate, (follow_mouse_system));
+    app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
+    app.run();
 }
 
 #[derive(Component)]
@@ -72,7 +64,7 @@ fn setup(mut commands: Commands) {
             connections: vec![],
         },
         Collider {
-            radius: 2.0,
+            shape: Shape::Circle { radius: 2.0 },
             layer: 2,
             layer_mask: 1,
         },
@@ -81,7 +73,7 @@ fn setup(mut commands: Commands) {
             position_old: p,
             position_current: p,
             acceleration: Vec2::ZERO,
-            friction: 0.5,
+            friction: 0.8,
             ..default()
         },
         Sprite::from_color(Color::BLACK, Vec2::splat(8.0)),
@@ -91,7 +83,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Transform::from_xyz(0.0, 0.0, 0.0),
         Collider {
-            radius: 8.0,
+            shape: Shape::Circle { radius: 8.0 },
             layer: 2,
             layer_mask: 1,
         },
@@ -143,7 +135,7 @@ fn setup(mut commands: Commands) {
 
     commands.spawn((
         VerletObject {
-            position_current: Vec2::new(50.0, 25.0),
+            position_current: Vec2::new(50.0, -300.0),
             position_old: Default::default(),
             acceleration: Default::default(),
             fixed: true,
@@ -153,7 +145,10 @@ fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.0, -5.0),
         StaticCollider,
         Collider {
-            radius: 25.0,
+            shape: Shape::Box {
+                width: 25.0,
+                height: 25.0,
+            },
             layer: 1,
             layer_mask: 3,
         },
@@ -171,136 +166,15 @@ fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.0, -5.0),
         StaticCollider,
         Collider {
-            radius: 25.0,
+            shape: Shape::Circle { radius: 25.0 },
             layer: 1,
             layer_mask: 3,
         },
     ));
 }
 
-trait Verlet {
-    fn accelerate(&mut self, acc: Vec2);
-}
-#[derive(Component)]
-struct VerletObject {
-    position_current: Vec2,
-    position_old: Vec2,
-    acceleration: Vec2,
-    fixed: bool,
-    drag: f32,
-    friction: f32,
-}
-
-impl Default for VerletObject {
-    fn default() -> Self {
-        return VerletObject {
-            position_current: Vec2::ZERO,
-            position_old: Vec2::ZERO,
-            acceleration: Vec2::ZERO,
-            fixed: false,
-            drag: 0.001,
-            friction: 0.01,
-        };
-    }
-}
-
-impl Verlet for VerletObject {
-    fn accelerate(&mut self, acc: Vec2) {
-        self.acceleration += acc;
-    }
-}
-
-#[derive(Component)]
-struct Stick {
-    ent1: Entity,
-    ent2: Entity,
-    length: f32,
-}
-
 #[derive(Component)]
 struct MouseFollower;
-
-#[derive(Component)]
-struct StaticCollider;
-
-#[derive(Component)]
-struct Collider {
-    radius: f32,
-    layer: u32,
-    layer_mask: u32,
-}
-
-fn update_verlet_position(mut verlet_query: Query<(&mut VerletObject, &mut Transform)>) {
-    for (mut verlet_object, mut transform) in verlet_query.iter_mut() {
-        if verlet_object.fixed {
-            transform.translation = Vec3::new(
-                verlet_object.position_current.x,
-                verlet_object.position_current.y,
-                transform.translation.z,
-            );
-            continue;
-        }
-        let vel = (verlet_object.position_current - verlet_object.position_old)
-            * (1.0 - verlet_object.drag);
-        verlet_object.position_old = verlet_object.position_current;
-        verlet_object.position_current =
-            verlet_object.position_old + vel + verlet_object.acceleration;
-        verlet_object.acceleration = Vec2::ZERO;
-        transform.translation = Vec3::new(
-            verlet_object.position_current.x,
-            verlet_object.position_current.y,
-            transform.translation.z,
-        );
-    }
-}
-
-fn apply_gravity(mut verlet_query: Query<(&mut VerletObject)>) {
-    for (mut verlet_object) in verlet_query.iter_mut() {
-        verlet_object.accelerate(-Vec2::Y * 0.01);
-    }
-}
-
-fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
-    const origin: Vec2 = Vec2::ZERO;
-    const radius: f32 = 350.0;
-    for (mut verlet_object) in verlet_query.iter_mut() {
-        if (verlet_object.position_current.y < -400.0) {
-            let normal = Vec2::Y;
-
-            apply_friction(normal, &mut verlet_object);
-            verlet_object.position_current.y = -400.0;
-        }
-        // let dirr = verlet_object.position_current - origin;
-        // if (dirr.length() > radius) {
-        //     verlet_object.position_current = origin + dirr.normalize() * radius;
-        // }
-    }
-}
-
-fn apply_friction(normal: Vec2, verlet_object: &mut VerletObject) -> Vec2 {
-    let vel = verlet_object.position_current - verlet_object.position_old;
-    let vel_n = normal * normal.dot(vel);
-    let vel_t = vel - vel_n;
-    verlet_object.position_current -= vel_t * verlet_object.friction;
-    return vel_t;
-}
-
-fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut VerletObject>) {
-    for (mut stick) in stick_query.iter() {
-        if let Ok([mut obj1, mut obj2]) = verlet_query.get_many_mut([stick.ent1, stick.ent2]) {
-            let diff = obj2.position_current - obj1.position_current;
-            let err = diff.length() - stick.length;
-
-            let ma = if obj1.fixed { 0.0 } else { 1.0 };
-            let mb = if obj2.fixed { 0.0 } else { 1.0 };
-            if (ma + mb <= 0.0) {
-                continue;
-            }
-            obj1.position_current += diff.normalize() * err * (ma / (ma + mb));
-            obj2.position_current -= diff.normalize() * err * (mb / (ma + mb));
-        }
-    }
-}
 
 fn follow_mouse_system(
     camera_query: Single<(&Camera, &GlobalTransform)>,
@@ -323,50 +197,6 @@ fn follow_mouse_system(
     };
     for (mut verlet_object) in verlet_query.iter_mut() {
         verlet_object.position_current = point;
-    }
-}
-
-fn static_collision_system(
-    mut collider_query: Query<(&Collider, &mut VerletObject), Without<StaticCollider>>,
-    static_collider_query: Query<(&Collider, &VerletObject), With<StaticCollider>>,
-) {
-    for (collider_a, mut verlet_object_a) in collider_query.iter_mut() {
-        for (collider_b, verlet_object_b) in static_collider_query.iter() {
-            let diff = verlet_object_b.position_current - verlet_object_a.position_current;
-            let max = collider_a.radius + collider_b.radius;
-            let norm = diff.normalize();
-            let err = diff.length() - max;
-            if (err < 0.0) {
-                apply_friction(norm, &mut verlet_object_a);
-
-                verlet_object_a.position_current += norm * err;
-            }
-        }
-    }
-}
-fn collision_system(mut collider_query: Query<(&Collider, &mut VerletObject)>) {
-    let mut combinations = collider_query.iter_combinations_mut();
-    while let Some([(collider_a, mut verlet_object_a), (collider_b, mut verlet_object_b)]) =
-        combinations.fetch_next()
-    {
-        if (collider_a.layer_mask & collider_b.layer == 0
-            || collider_b.layer_mask & collider_a.layer == 0)
-        {
-            continue;
-        }
-        let diff = verlet_object_b.position_current - verlet_object_a.position_current;
-        let max = collider_a.radius + collider_b.radius;
-        let norm = diff.normalize();
-        let err = diff.length() - max;
-        if (err < 0.0) {
-            let ma = if verlet_object_a.fixed { 0.0 } else { 1.0 };
-            let mb = if verlet_object_b.fixed { 0.0 } else { 1.0 };
-            if (ma + mb <= 0.0) {
-                continue;
-            }
-            verlet_object_a.position_current += norm * err * ma / (ma + mb);
-            verlet_object_b.position_current -= norm * err * mb / (ma + mb);
-        }
     }
 }
 
@@ -400,7 +230,7 @@ fn spawn_rope_system(
             let new = commands.spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 Collider {
-                    radius: 4.0,
+                    shape: Shape::Circle { radius: 4.0 },
                     layer: 1,
                     layer_mask: 1,
                 },
@@ -508,62 +338,6 @@ fn shoot_rope_system(
                     shooter: entity,
                 }),
             );
-        }
-    }
-}
-
-fn mouse_constraint_system(
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    windows: Query<&Window>,
-    mut player_query: Query<(&mut RopeHolder, Entity)>,
-    mut verlet_object_query: Query<&mut VerletObject>,
-) {
-    let (camera, camera_transform) = *camera_query;
-
-    let Ok(window) = windows.get_single() else {
-        return;
-    };
-
-    let cursor_position = window.cursor_position();
-
-    // Calculate a world position based on the cursor's position.
-    let point =
-        cursor_position.and_then(|pos| camera.viewport_to_world_2d(camera_transform, pos).ok());
-
-    for (mut rope_holer, entity) in player_query.iter_mut() {
-        if let Ok([mut obj1, mut obj2]) =
-            verlet_object_query.get_many_mut([entity, rope_holer.hand])
-        {
-            let mouse_pos = point.unwrap_or(rope_holer.last_pos);
-            let diff_obj2 = (mouse_pos - obj2.position_current);
-            // let target_position = obj1.position_current - diff_obj2;
-            // let diff_to_target = target_position - obj1.position_current;
-            let length = diff_obj2.length().min(64.0);
-            let ideal_pos = obj1.position_current + diff_obj2.normalize() * length;
-            // let ideal_pos = obj1.position_current - Vec2::Y * 50.0;
-            let diff = ideal_pos - obj2.position_current;
-            if (diff.length() == 0.0) {
-                continue;
-            }
-            let diff_norm = diff.clone().normalize();
-
-            obj2.position_current += diff_norm * diff.length().min(0.5) * 0.95;
-
-            obj1.position_current -= diff_norm * diff.length().min(0.5) * 0.05;
-
-            let hand_diff = obj2.position_current - obj1.position_current;
-            let hand_diff_norm = hand_diff.clone().normalize();
-            let err = 64.0 - hand_diff.length();
-            if (err < 0.0) {
-                obj1.position_current -= hand_diff_norm * err * 0.05;
-                obj2.position_current += hand_diff_norm * err * 0.95;
-            }
-            rope_holer.last_pos = mouse_pos;
-
-            if (obj1.position_current.is_nan()) {
-                println!("nan");
-            }
-            // obj2.position_current += diff / 2.0;
         }
     }
 }
