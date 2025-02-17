@@ -6,6 +6,8 @@ use bevy::prelude::{
     Camera, Component, Entity, FixedPreUpdate, GlobalTransform, IntoSystemConfigs, Query, Single,
     Transform, Window, With, Without, World,
 };
+use bevy::utils::HashMap;
+use std::iter::Map;
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct SubStepSchedule;
@@ -62,8 +64,7 @@ impl Plugin for PhysicsPlugin {
         app.add_systems(
             SubStepSchedule,
             (
-                apply_gravity,
-                apply_constraints,
+                // apply_constraints,
                 update_verlet_position,
                 stick_constraints,
                 static_collision_system, // collision_system,
@@ -80,21 +81,24 @@ fn run_sub_steps(world: &mut World) {
 }
 
 fn static_collision_system(
-    mut collider_query: Query<(&Collider, &mut VerletObject), Without<StaticCollider>>,
-    static_collider_query: Query<(&Collider, &VerletObject), With<StaticCollider>>,
+    mut collider_query: Query<
+        (&Collider, &mut VerletObject, Option<&mut TrackCollision>),
+        Without<StaticCollider>,
+    >,
+    static_collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
 ) {
-    for (collider_a, mut verlet_object_a) in collider_query.iter_mut() {
-        for (collider_b, verlet_object_b) in static_collider_query.iter() {
+    for (collider_a, mut verlet_object_a, mut tracker) in collider_query.iter_mut() {
+        for (collider_b, verlet_object_b, ent) in static_collider_query.iter() {
             let (collides, err, norm) =
                 calc_collision(&verlet_object_a, &verlet_object_b, collider_a, collider_b);
-            // let diff = verlet_object_b.position_current - verlet_object_a.position_current;
-            // let max = collider_a.radius + collider_b.radius;
-            // let norm = diff.normalize();
-            // let err = diff.length() - max;
             if (collides) {
                 apply_friction(norm, &mut verlet_object_a);
 
                 verlet_object_a.position_current += err;
+
+                if let Some(mut tracker_a) = tracker.take() {
+                    tracker_a.collisions.insert(ent, Collision { normal: norm });
+                }
             }
         }
     }
@@ -139,6 +143,14 @@ pub struct Collider {
     pub layer_mask: u32,
 }
 
+pub struct Collision {
+    pub normal: Vec2,
+}
+#[derive(Component)]
+pub struct TrackCollision {
+    pub collisions: HashMap<Entity, Collision>,
+}
+
 //returns doesCollide, error-vector, normal-vector
 
 fn circle_circle_collision(pos_a: Vec2, pos_b: Vec2, r_a: f32, r_b: f32) -> (bool, Vec2, Vec2) {
@@ -159,35 +171,34 @@ fn circle_box_collision(
     width: f32,
     height: f32,
 ) -> (bool, Vec2, Vec2) {
-    //get closest corner
-
-    let mut check_axis: Vec<Vec2> = vec![];
     let left = pos_b.x - width;
     let right = pos_b.x + width;
     let closest_x;
+    let axis1;
     if (pos_a.x - right).abs() < (pos_a.x - left).abs() {
         closest_x = right;
-        check_axis.push(Vec2::X);
+        axis1 = Vec2::X;
     } else {
         closest_x = left;
-        check_axis.push(Vec2::NEG_X);
+        axis1 = Vec2::NEG_X;
     };
 
     let top = pos_b.y + height;
     let bottom = pos_b.y - height;
     let closest_y;
+    let axis2;
     if (pos_a.y - top).abs() < (pos_a.y - bottom).abs() {
+        axis2 = Vec2::Y;
         closest_y = top;
-        check_axis.push(Vec2::Y);
     } else {
+        axis2 = Vec2::NEG_Y;
         closest_y = bottom;
-        check_axis.push(Vec2::NEG_Y);
     };
     let closest_point = Vec2::new(closest_x, closest_y);
 
-    check_axis.push((pos_a - closest_point).normalize());
+    let check_axis = [(pos_a - closest_point).normalize(), axis1, axis2];
 
-    let mut depth: f32 = 100000.0;
+    let mut depth: f32 = f32::INFINITY;
     let mut norm: Vec2 = Vec2::ZERO;
 
     let offsets = [
@@ -199,23 +210,30 @@ fn circle_box_collision(
 
     for axis in check_axis {
         let proj_a = axis.dot(pos_a) - radius;
-        let proj_b = offsets
-            .iter()
-            .map(|&offset| axis.dot(pos_b + offset))
-            .fold(f32::NEG_INFINITY, f32::max);
+        let mut proj_b_min = f32::INFINITY;
+        let mut proj_b_max = f32::NEG_INFINITY;
+        for &offset in &[
+            Vec2::new(width, height),
+            Vec2::new(-width, height),
+            Vec2::new(width, -height),
+            Vec2::new(-width, -height),
+        ] {
+            let projection = axis.dot(pos_b + offset);
+            proj_b_min = proj_b_min.min(projection);
+            proj_b_max = proj_b_max.max(projection);
+        }
 
-        let axis_depth = proj_b - proj_a;
+        let axis_depth = proj_b_max - proj_a;
         if (axis_depth < depth) {
             depth = axis_depth;
             norm = axis;
         }
+        if depth < 0.0 {
+            return (false, Vec2::ZERO, Vec2::ZERO); // Early exit if no collision
+        }
     }
 
     return (depth > 0.0, norm * depth, norm);
-    //get axises
-    //loop over them
-    //get points on axis
-    //check depth
 }
 fn calc_collision(
     a_obj: &VerletObject,
@@ -283,7 +301,7 @@ fn update_verlet_position(mut verlet_query: Query<(&mut VerletObject, &mut Trans
         verlet_object.position_old = verlet_object.position_current;
         verlet_object.position_current =
             verlet_object.position_old + vel + verlet_object.acceleration;
-        verlet_object.acceleration = Vec2::ZERO;
+        // verlet_object.acceleration = Vec2::ZERO;
         transform.translation = Vec3::new(
             verlet_object.position_current.x,
             verlet_object.position_current.y,
@@ -304,15 +322,21 @@ fn reset_forces(mut verlet_query: Query<(&mut VerletObject)>) {
     }
 }
 
+fn reset_collisions(mut collision_query: Query<(&mut TrackCollision)>) {
+    for (mut col) in collision_query.iter_mut() {
+        col.collisions.clear();
+    }
+}
+
 fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
     const origin: Vec2 = Vec2::ZERO;
     const radius: f32 = 350.0;
     for (mut verlet_object) in verlet_query.iter_mut() {
-        if (verlet_object.position_current.y < -400.0) {
+        if (verlet_object.position_current.y < -800.0) {
             let normal = Vec2::Y;
 
             apply_friction(normal, &mut verlet_object);
-            verlet_object.position_current.y = -400.0;
+            verlet_object.position_current.y = -800.0;
         }
         // let dirr = verlet_object.position_current - origin;
         // if (dirr.length() > radius) {

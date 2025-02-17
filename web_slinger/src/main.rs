@@ -9,9 +9,9 @@ use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::{
-    App, ButtonInput, Camera, Camera2d, ClearColor, Commands, Component, Entity, GlobalTransform,
-    MouseButton, PluginGroup, Query, Res, Single, Transform, Update, Vec2, Vec3, Window, With,
-    Without, World,
+    App, ButtonInput, Camera, Camera2d, Changed, ClearColor, Commands, Component, Entity,
+    GlobalTransform, MouseButton, PluginGroup, Query, Res, Single, Transform, Update, Vec2, Vec3,
+    Window, With, Without, World,
 };
 use bevy::sprite::Sprite;
 use bevy::utils::default;
@@ -19,6 +19,7 @@ use bevy::window::{CompositeAlphaMode, PrimaryWindow, WindowLevel, WindowPlugin}
 use bevy::DefaultPlugins;
 use bevy_wasm_window_resize::WindowResizePlugin;
 use std::process::id;
+use std::slice::Windows;
 
 fn main() {
     println!("Web_Slinger activated");
@@ -27,6 +28,8 @@ fn main() {
         primary_window: Some(Window {
             #[cfg(target_arch = "wasm32")]
             canvas: Some("#bevy".into()),
+            #[cfg(target_arch = "wasm32")]
+            prevent_default_event_handling: false,
             ..default()
         }),
         ..default()
@@ -39,7 +42,10 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     app.insert_resource(ClearColor(Color::NONE));
     app.add_systems(FixedUpdate, (follow_mouse_system));
-    app.add_systems(Update, (shoot_rope_system, spawn_rope_system));
+    app.add_systems(
+        Update,
+        (align_camera_origin, shoot_rope_system, spawn_rope_system),
+    );
     app.run();
 }
 
@@ -52,13 +58,30 @@ struct RopeHolder {
     hand: Entity,
 }
 
+fn align_camera_origin(
+    windows: Query<&Window>,
+    mut transforms: Query<&mut Transform, With<Camera>>,
+) {
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+    let Ok(mut transform) = transforms.get_single_mut() else {
+        return;
+    };
+
+    transform.translation.x = window.width() / 2.0;
+    transform.translation.y = -window.height() / 2.0;
+}
+
 fn setup(mut commands: Commands) {
+    let mut camera = Camera2d;
+
     commands.spawn((Camera2d));
     let mut last_ent: Option<Entity> = None;
 
-    let p = Vec2::new(-50.0, 0.0);
+    let p = Vec2::new(800.0, -50.0);
     let hand = commands.spawn((
-        Transform::from_xyz(-50.0, 0.0, 0.0),
+        Transform::from_xyz(p.x, p.y, 0.0),
         RopeShooter {
             delete_old: true,
             connections: vec![],
@@ -81,7 +104,7 @@ fn setup(mut commands: Commands) {
     let hand_ent = hand.id();
 
     commands.spawn((
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(p.x, p.y, 0.0),
         Collider {
             shape: Shape::Circle { radius: 8.0 },
             layer: 2,
@@ -133,44 +156,44 @@ fn setup(mut commands: Commands) {
     //     last_ent = Some(new_ent);
     // }
 
-    commands.spawn((
-        VerletObject {
-            position_current: Vec2::new(50.0, -300.0),
-            position_old: Default::default(),
-            acceleration: Default::default(),
-            fixed: true,
-            ..default()
-        },
-        Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
-        Transform::from_xyz(0.0, 0.0, -5.0),
-        StaticCollider,
-        Collider {
-            shape: Shape::Box {
-                width: 25.0,
-                height: 25.0,
-            },
-            layer: 1,
-            layer_mask: 3,
-        },
-    ));
-
-    commands.spawn((
-        VerletObject {
-            position_current: Vec2::new(-150.0, 90.0),
-            position_old: Default::default(),
-            acceleration: Default::default(),
-            fixed: true,
-            ..default()
-        },
-        Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
-        Transform::from_xyz(0.0, 0.0, -5.0),
-        StaticCollider,
-        Collider {
-            shape: Shape::Circle { radius: 25.0 },
-            layer: 1,
-            layer_mask: 3,
-        },
-    ));
+    // commands.spawn((
+    //     VerletObject {
+    //         position_current: Vec2::new(250.0, -400.0),
+    //         position_old: Default::default(),
+    //         acceleration: Default::default(),
+    //         fixed: true,
+    //         ..default()
+    //     },
+    //     Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
+    //     Transform::from_xyz(0.0, 0.0, -5.0),
+    //     StaticCollider,
+    //     Collider {
+    //         shape: Shape::Box {
+    //             width: 25.0,
+    //             height: 25.0,
+    //         },
+    //         layer: 1,
+    //         layer_mask: 3,
+    //     },
+    // ));
+    //
+    // commands.spawn((
+    //     VerletObject {
+    //         position_current: Vec2::new(400.0, -300.0),
+    //         position_old: Default::default(),
+    //         acceleration: Default::default(),
+    //         fixed: true,
+    //         ..default()
+    //     },
+    //     Sprite::from_color(Color::BLACK, Vec2::splat(50.0)),
+    //     Transform::from_xyz(0.0, 0.0, -5.0),
+    //     StaticCollider,
+    //     Collider {
+    //         shape: Shape::Circle { radius: 25.0 },
+    //         layer: 1,
+    //         layer_mask: 3,
+    //     },
+    // ));
 }
 
 #[derive(Component)]

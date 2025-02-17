@@ -1,6 +1,9 @@
-use bevy::app::{App, FixedUpdate, Plugin};
-use bevy::prelude::Commands;
+use crate::physics::{Collider, Shape, StaticCollider, VerletObject};
+use bevy::app::{App, FixedUpdate, Plugin, Startup};
+use bevy::prelude::{Color, Commands, Transform, Vec2};
 use bevy::reflect::erased_serde::__private::serde::{Deserialize, Serialize};
+use bevy::sprite::Sprite;
+use bevy::utils::default;
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::JsValue;
@@ -9,7 +12,7 @@ pub struct CollisionImportPlugin;
 
 impl Plugin for CollisionImportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(FixedUpdate, get_colliders_system);
+        app.add_systems(Startup, get_colliders_system);
     }
 }
 
@@ -19,7 +22,33 @@ fn get_colliders_system() {}
 #[cfg(target_arch = "wasm32")]
 fn get_colliders_system(mut commands: Commands) {
     let colliders = get_colliders_rust();
-    log(colliders.len().to_string().as_str());
+
+    for collider in colliders {
+        let mid_x = (collider.right + collider.left) / 2.0;
+        let mid_y = (-collider.top + -collider.bottom) / 2.0;
+        let width = (collider.right - collider.left).abs() / 2.0;
+        let height = (-collider.top + collider.bottom).abs() / 2.0;
+
+        let pos = Vec2::new(mid_x, mid_y);
+        commands.spawn((
+            StaticCollider,
+            Collider {
+                layer: 1,
+                layer_mask: 1,
+                shape: Shape::Box {
+                    width: width,
+                    height: height,
+                },
+            },
+            VerletObject {
+                fixed: true,
+                position_current: pos,
+                ..default()
+            },
+            // Sprite::from_color(Color::BLACK, Vec2::new(width * 2.0, height * 2.0)),
+            Transform::from_xyz(pos.x, pos.y, 1.0),
+        ));
+    }
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct TestCollider {
