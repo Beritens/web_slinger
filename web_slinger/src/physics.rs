@@ -6,8 +6,11 @@ use bevy::prelude::{
     Camera, Component, Entity, FixedPreUpdate, GlobalTransform, IntoSystemConfigs, Query, Single,
     Transform, Window, With, Without, World,
 };
+use bevy::ui::ExtractedUiItem::Node;
 use bevy::utils::HashMap;
+use std::cell::RefCell;
 use std::iter::Map;
+use std::rc::Rc;
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct SubStepSchedule;
@@ -78,6 +81,134 @@ fn run_sub_steps(world: &mut World) {
     for i in 0..8 {
         world.run_schedule(SubStepSchedule);
     }
+}
+
+pub struct CollisionWorld {
+    pub kd_tree: Rc<RefCell<KDNode>>,
+}
+
+#[derive(Clone)]
+pub struct AABB {
+    pub pos: Vec2,
+    pub size: Vec2,
+}
+pub struct KDNode {
+    bounding_box: AABB,
+    left_node: Option<Rc<RefCell<KDNode>>>,
+    right_node: Option<Rc<RefCell<KDNode>>>,
+    objects: Vec<Entity>,
+}
+
+#[derive(Clone)]
+struct ColliderObj {
+    entity: Entity,
+    bounding_box: AABB,
+}
+fn kd_tree(objects: &mut Vec<ColliderObj>, depth: usize) -> Option<Rc<RefCell<KDNode>>> {
+    if (objects.is_empty()) {
+        return None;
+    }
+
+    let axis = depth % 2;
+
+    objects.sort_by(|a, b| {
+        if axis == 0 {
+            a.bounding_box
+                .pos
+                .x
+                .partial_cmp(&b.bounding_box.pos.x)
+                .unwrap()
+        } else {
+            a.bounding_box
+                .pos
+                .y
+                .partial_cmp(&b.bounding_box.pos.y)
+                .unwrap()
+        }
+    });
+
+    let mid = objects.len() / 2;
+
+    let mut right_objects = objects.split_off(mid);
+    let left_objects = objects;
+
+    let left_node = kd_tree(left_objects, depth + 1);
+    let right_node = kd_tree(&mut right_objects, depth + 1);
+    let bounding_box: AABB;
+    if let (Some(l), Some(r)) = (left_node.as_ref(), right_node.as_ref()) {
+        let bl = l.borrow().bounding_box.clone();
+        let br = r.borrow().bounding_box.clone();
+        bounding_box = combine_bounding_boxes(bl, br);
+    } else if let Some(l) = left_node.as_ref() {
+        bounding_box = l.borrow().bounding_box.clone();
+    } else if let Some(r) = right_node.as_ref() {
+        bounding_box = r.borrow().bounding_box.clone();
+    } else {
+        bounding_box = AABB {
+            pos: Default::default(),
+            size: Default::default(),
+        };
+    }
+
+    Some(Rc::new(RefCell::new(KDNode {
+        bounding_box,
+        left_node,
+        right_node,
+        objects: vec![],
+    })))
+
+    // let bounding_box = combine_bounding_boxes(left_node, right_node);
+    // let node = Node {
+    //     left_node: left_node,
+    //     right_node: right_node,
+    //     bounding_box: bounding_box,
+    //     objects: vec![],
+    // };
+
+    // sort stuff
+    // choose mid point
+    // call kd_tree() with one half and other dimension
+    // call kd_tree() with other half and other dimension
+    // combine bounding boxes to get bounding box of current node
+}
+fn combine_bounding_boxes(left: AABB, right: AABB) -> AABB {
+    // You would want to merge the AABBs from both sides (left and right) here
+
+    // Combine AABBs to cover both regions
+    AABB {
+        pos: Vec2 {
+            x: left.pos.x.min(right.pos.x),
+            y: left.pos.y.min(right.pos.y),
+        },
+        size: Vec2 {
+            x: (left.pos.x + left.size.x).max(right.pos.x + right.size.x)
+                - (left.pos.x).min(right.pos.x),
+            y: (left.pos.y + left.size.y).max(right.pos.y + right.size.y)
+                - (left.pos.y).min(right.pos.y),
+        },
+    }
+}
+fn build_collision_tree(
+    collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
+) {
+    let mut objects: Vec<ColliderObj> = vec![];
+    for (collider, verlet_obj, entity) in collider_query.iter() {
+        let bounds: AABB;
+        match collider.shape {
+            Shape::Circle { radius } => {
+                return;
+            }
+            Shape::Box { width, height } => {
+                bounds = AABB {
+                    pos: verlet_obj.position_current - Vec2::new(width, height),
+                    size: Vec2::new(width * 2.0, height * 2.0),
+                };
+            }
+        }
+    }
+    //go over each collider
+    //get bounding box of collider
+    //call kd_tree() with all collider-bounding box pairs
 }
 
 fn static_collision_system(
