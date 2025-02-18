@@ -1,16 +1,14 @@
 use crate::RopeHolder;
-use bevy::app::{App, FixedUpdate, Plugin};
+use bevy::app::{App, FixedUpdate, Plugin, Startup};
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{
-    Camera, Component, Entity, FixedPreUpdate, GlobalTransform, IntoSystemConfigs, Query, Single,
-    Transform, Window, With, Without, World,
+    Camera, Commands, Component, Entity, FixedPreUpdate, GlobalTransform, IntoSystemConfigs, Query,
+    Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Transform, Window, With, Without,
+    World,
 };
-use bevy::ui::ExtractedUiItem::Node;
 use bevy::utils::HashMap;
-use std::cell::RefCell;
-use std::iter::Map;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct SubStepSchedule;
@@ -56,13 +54,24 @@ pub struct Stick {
     pub length: f32,
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CollisionSetup;
+
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(FixedPreUpdate, (reset_forces));
         app.add_systems(
+            Startup,
+            (
+                // display_collision_tree.after(build_collision_tree),
+                (build_collision_tree).in_set(CollisionSetup),
+            ),
+        );
+        app.add_systems(
             FixedUpdate,
             (apply_gravity.before(run_sub_steps), run_sub_steps),
         );
+        app.insert_resource(CollisionWorld { kd_tree: None });
 
         app.add_systems(
             SubStepSchedule,
@@ -83,8 +92,9 @@ fn run_sub_steps(world: &mut World) {
     }
 }
 
+#[derive(Resource)]
 pub struct CollisionWorld {
-    pub kd_tree: Rc<RefCell<KDNode>>,
+    pub kd_tree: Option<Arc<Mutex<KDNode>>>,
 }
 
 #[derive(Clone)]
@@ -92,10 +102,29 @@ pub struct AABB {
     pub pos: Vec2,
     pub size: Vec2,
 }
+
+impl AABB {
+    fn intersects(&self, other: &AABB) -> bool {
+        let min_x_a = self.pos.x;
+        let min_y_a = self.pos.y;
+        let min_x_b = other.pos.x;
+        let min_y_b = other.pos.y;
+
+        let max_x_a = self.pos.x + self.size.x;
+        let max_y_a = self.pos.y + self.size.y;
+        let max_x_b = other.pos.x + other.size.x;
+        let max_y_b = other.pos.y + other.size.y;
+
+        return (min_x_a <= max_x_b
+            && max_x_a >= min_x_b
+            && min_y_a <= max_y_b
+            && max_y_a >= min_y_b);
+    }
+}
 pub struct KDNode {
     bounding_box: AABB,
-    left_node: Option<Rc<RefCell<KDNode>>>,
-    right_node: Option<Rc<RefCell<KDNode>>>,
+    left_node: Option<Arc<Mutex<KDNode>>>,
+    right_node: Option<Arc<Mutex<KDNode>>>,
     objects: Vec<Entity>,
 }
 
@@ -104,9 +133,19 @@ struct ColliderObj {
     entity: Entity,
     bounding_box: AABB,
 }
-fn kd_tree(objects: &mut Vec<ColliderObj>, depth: usize) -> Option<Rc<RefCell<KDNode>>> {
-    if (objects.is_empty()) {
+fn kd_tree(objects: &mut Vec<ColliderObj>, depth: usize) -> Option<Arc<Mutex<KDNode>>> {
+    if (objects.len() <= 0) {
         return None;
+    }
+
+    if (objects.len() == 1) {
+        let obj = objects.pop().unwrap();
+        return Some(Arc::new(Mutex::new(KDNode {
+            bounding_box: obj.bounding_box,
+            left_node: None,
+            right_node: None,
+            objects: vec![obj.entity],
+        })));
     }
 
     let axis = depth % 2;
@@ -136,13 +175,13 @@ fn kd_tree(objects: &mut Vec<ColliderObj>, depth: usize) -> Option<Rc<RefCell<KD
     let right_node = kd_tree(&mut right_objects, depth + 1);
     let bounding_box: AABB;
     if let (Some(l), Some(r)) = (left_node.as_ref(), right_node.as_ref()) {
-        let bl = l.borrow().bounding_box.clone();
-        let br = r.borrow().bounding_box.clone();
+        let bl = l.lock().unwrap().bounding_box.clone();
+        let br = r.lock().unwrap().bounding_box.clone();
         bounding_box = combine_bounding_boxes(bl, br);
     } else if let Some(l) = left_node.as_ref() {
-        bounding_box = l.borrow().bounding_box.clone();
+        bounding_box = l.lock().unwrap().bounding_box.clone();
     } else if let Some(r) = right_node.as_ref() {
-        bounding_box = r.borrow().bounding_box.clone();
+        bounding_box = r.lock().unwrap().bounding_box.clone();
     } else {
         bounding_box = AABB {
             pos: Default::default(),
@@ -150,7 +189,7 @@ fn kd_tree(objects: &mut Vec<ColliderObj>, depth: usize) -> Option<Rc<RefCell<KD
         };
     }
 
-    Some(Rc::new(RefCell::new(KDNode {
+    Some(Arc::new(Mutex::new(KDNode {
         bounding_box,
         left_node,
         right_node,
@@ -190,6 +229,7 @@ fn combine_bounding_boxes(left: AABB, right: AABB) -> AABB {
 }
 fn build_collision_tree(
     collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
+    mut collision_world_resource: ResMut<CollisionWorld>,
 ) {
     let mut objects: Vec<ColliderObj> = vec![];
     for (collider, verlet_obj, entity) in collider_query.iter() {
@@ -205,10 +245,78 @@ fn build_collision_tree(
                 };
             }
         }
+        let obj = ColliderObj {
+            bounding_box: bounds,
+            entity,
+        };
+        objects.push(obj);
     }
+
+    let tree: Option<Arc<Mutex<KDNode>>> = kd_tree(&mut objects, 0);
+
+    collision_world_resource.kd_tree = tree.clone();
     //go over each collider
     //get bounding box of collider
     //call kd_tree() with all collider-bounding box pairs
+}
+
+fn display_sub_tree(node: &KDNode, commands: &mut Commands, depth: usize) {
+    if (depth > 5) {
+        return;
+    }
+    if (depth == 5) {
+        let color = Srgba {
+            red: 0.4,
+            green: 1.0,
+            blue: 1.0,
+            alpha: 0.01,
+        };
+        commands.spawn((
+            Transform::from_xyz(
+                node.bounding_box.pos.x + node.bounding_box.size.x / 2.0,
+                node.bounding_box.pos.y + node.bounding_box.size.y / 2.0,
+                5.0 + depth as f32 / 2.0,
+            ),
+            Sprite::from_color(
+                color,
+                Vec2::new(node.bounding_box.size.x, node.bounding_box.size.y),
+            ),
+        ));
+    }
+
+    if let Some(ref node) = node.left_node {
+        let kd_node = node.lock().unwrap();
+        display_sub_tree(&kd_node, commands, depth + 1);
+    }
+
+    if let Some(ref node) = node.right_node {
+        let kd_node = node.lock().unwrap();
+        display_sub_tree(&kd_node, commands, depth + 1);
+    }
+}
+fn display_collision_tree(mut commands: Commands, col_world: Res<CollisionWorld>) {
+    if let Some(ref node) = col_world.kd_tree {
+        let kd_node = node.lock().unwrap();
+        display_sub_tree(&kd_node, &mut commands, 0);
+    }
+}
+
+fn find_collision_entities(bounding_box: &AABB, tree: &Option<Arc<Mutex<KDNode>>>) -> Vec<Entity> {
+    let mut colliders: Vec<Entity> = vec![];
+    if let Some(node) = tree {
+        let node = node.lock().unwrap();
+        if (!bounding_box.intersects(&node.bounding_box)) {
+            return colliders;
+        }
+        let colsl = find_collision_entities(bounding_box, &node.left_node.clone());
+        let colsr = find_collision_entities(bounding_box, &node.right_node.clone());
+        colliders.extend(colsl);
+        colliders.extend(colsr);
+        for &object in &node.objects {
+            colliders.push(object);
+        }
+    }
+    return colliders;
 }
 
 fn static_collision_system(
@@ -216,19 +324,25 @@ fn static_collision_system(
         (&Collider, &mut VerletObject, Option<&mut TrackCollision>),
         Without<StaticCollider>,
     >,
+    kd_tree: Res<CollisionWorld>,
     static_collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
 ) {
     for (collider_a, mut verlet_object_a, mut tracker) in collider_query.iter_mut() {
-        for (collider_b, verlet_object_b, ent) in static_collider_query.iter() {
-            let (collides, err, norm) =
-                calc_collision(&verlet_object_a, &verlet_object_b, collider_a, collider_b);
-            if (collides) {
-                apply_friction(norm, &mut verlet_object_a);
+        let bounding_box: AABB = collider_a.getBoundingBox(verlet_object_a.position_current);
+        let colliders = find_collision_entities(&bounding_box, &kd_tree.kd_tree);
+        for col_ent in colliders {
+            if let Ok((collider_b, verlet_object_b, ent)) = static_collider_query.get(col_ent) {
+                let (collides, err, norm) =
+                    calc_collision(&verlet_object_a, &verlet_object_b, collider_a, collider_b);
 
-                verlet_object_a.position_current += err;
+                if (collides) {
+                    apply_friction(norm, &mut verlet_object_a);
 
-                if let Some(mut tracker_a) = tracker.take() {
-                    tracker_a.collisions.insert(ent, Collision { normal: norm });
+                    verlet_object_a.position_current += err;
+
+                    if let Some(mut tracker_a) = tracker.take() {
+                        tracker_a.collisions.insert(ent, Collision { normal: norm });
+                    }
                 }
             }
         }
@@ -272,6 +386,25 @@ pub struct Collider {
     pub shape: Shape,
     pub layer: u32,
     pub layer_mask: u32,
+}
+
+impl Collider {
+    fn getBoundingBox(&self, pos: Vec2) -> AABB {
+        match self.shape {
+            Shape::Box { width, height } => {
+                return AABB {
+                    pos: Vec2::new(pos.x - width, pos.y - height),
+                    size: Vec2::new(width * 2.0, height * 2.0),
+                };
+            }
+            Shape::Circle { radius } => {
+                return AABB {
+                    pos: Vec2::new(pos.x - radius, pos.y - radius),
+                    size: Vec2::new(radius * 2.0, radius * 2.0),
+                }
+            }
+        }
+    }
 }
 
 pub struct Collision {

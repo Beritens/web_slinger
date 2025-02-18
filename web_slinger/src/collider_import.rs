@@ -1,6 +1,6 @@
-use crate::physics::{Collider, Shape, StaticCollider, VerletObject};
+use crate::physics::{Collider, CollisionSetup, Shape, StaticCollider, VerletObject};
 use bevy::app::{App, FixedUpdate, Plugin, Startup};
-use bevy::prelude::{Color, Commands, Transform, Vec2};
+use bevy::prelude::{Color, Commands, IntoSystemConfigs, Transform, Vec2};
 use bevy::reflect::erased_serde::__private::serde::{Deserialize, Serialize};
 use bevy::sprite::Sprite;
 use bevy::utils::default;
@@ -12,12 +12,36 @@ pub struct CollisionImportPlugin;
 
 impl Plugin for CollisionImportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, get_colliders_system);
+        app.add_systems(Startup, get_colliders_system.before(CollisionSetup));
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn get_colliders_system() {}
+fn get_colliders_system(mut commands: Commands) {
+    for i in 0..=10 {
+        for j in 0..=10 {
+            let pos = Vec2::new(100.0 + (i as f32 * 40.0), -500.0 + (j as f32 * 40.0));
+            commands.spawn((
+                StaticCollider,
+                Collider {
+                    layer: 1,
+                    layer_mask: 1,
+                    shape: Shape::Box {
+                        width: 15.0,
+                        height: 15.0,
+                    },
+                },
+                VerletObject {
+                    fixed: true,
+                    position_current: pos,
+                    ..default()
+                },
+                Sprite::from_color(Color::BLACK, Vec2::new(30.0, 30.0)),
+                Transform::from_xyz(pos.x, pos.y, 1.0),
+            ));
+        }
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 fn get_colliders_system(mut commands: Commands) {
