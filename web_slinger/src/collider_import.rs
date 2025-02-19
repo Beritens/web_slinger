@@ -1,6 +1,7 @@
 use crate::physics::{Collider, CollisionSetup, Shape, StaticCollider, VerletObject};
 use bevy::app::{App, FixedUpdate, Plugin, Startup};
-use bevy::prelude::{Color, Commands, IntoSystemConfigs, Transform, Vec2};
+use bevy::color::Srgba;
+use bevy::prelude::{Color, Commands, Component, IntoSystemConfigs, Transform, Vec2};
 use bevy::reflect::erased_serde::__private::serde::{Deserialize, Serialize};
 use bevy::sprite::Sprite;
 use bevy::utils::default;
@@ -18,9 +19,9 @@ impl Plugin for CollisionImportPlugin {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn get_colliders_system(mut commands: Commands) {
-    for i in 0..=10 {
-        for j in 0..=10 {
-            let pos = Vec2::new(100.0 + (i as f32 * 40.0), -500.0 + (j as f32 * 40.0));
+    for i in 0..=5 {
+        for j in 0..=5 {
+            let pos = Vec2::new(400.0 + (i as f32 * 100.0), -300.0 - (j as f32 * 100.0));
             commands.spawn((
                 StaticCollider,
                 Collider {
@@ -36,11 +37,19 @@ fn get_colliders_system(mut commands: Commands) {
                     position_current: pos,
                     ..default()
                 },
+                Colored {
+                    color: Color::BLACK,
+                },
                 Sprite::from_color(Color::BLACK, Vec2::new(30.0, 30.0)),
                 Transform::from_xyz(pos.x, pos.y, 1.0),
             ));
         }
     }
+}
+
+#[derive(Component)]
+pub struct Colored {
+    pub color: Color,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -52,6 +61,12 @@ fn get_colliders_system(mut commands: Commands) {
         let mid_y = (-collider.top + -collider.bottom) / 2.0;
         let width = (collider.right - collider.left).abs() / 2.0;
         let height = (-collider.top + collider.bottom).abs() / 2.0;
+        let color = Srgba {
+            red: collider.color.r / 255.0,
+            green: collider.color.g / 255.0,
+            blue: collider.color.b / 255.0,
+            alpha: 1.0,
+        };
 
         let pos = Vec2::new(mid_x, mid_y);
         commands.spawn((
@@ -69,10 +84,21 @@ fn get_colliders_system(mut commands: Commands) {
                 position_current: pos,
                 ..default()
             },
+            Colored {
+                color: Color::Srgba(color),
+            },
             // Sprite::from_color(Color::BLACK, Vec2::new(width * 2.0, height * 2.0)),
             Transform::from_xyz(pos.x, pos.y, 1.0),
         ));
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ColorDTO {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct TestCollider {
@@ -80,6 +106,8 @@ struct TestCollider {
     bottom: f32,
     right: f32,
     left: f32,
+    letter: String,
+    color: ColorDTO,
 }
 
 #[cfg(target_arch = "wasm32")]

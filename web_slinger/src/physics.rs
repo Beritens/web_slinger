@@ -1,11 +1,12 @@
 use crate::RopeHolder;
 use bevy::app::{App, FixedUpdate, Plugin, Startup};
 use bevy::ecs::schedule::ScheduleLabel;
+use bevy::input::mouse::MouseMotion;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{
-    Camera, Commands, Component, Entity, FixedPreUpdate, GlobalTransform, IntoSystemConfigs, Query,
-    Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Transform, Window, With, Without,
-    World,
+    Camera, Commands, Component, Entity, EventReader, FixedPreUpdate, FloatExt, GlobalTransform,
+    IntoSystemConfigs, Query, Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Transform,
+    Update, Window, With, Without, World,
 };
 use bevy::utils::HashMap;
 use std::sync::{Arc, Mutex};
@@ -36,7 +37,7 @@ impl Default for VerletObject {
             acceleration: Vec2::ZERO,
             fixed: false,
             drag: 0.001,
-            friction: 0.01,
+            friction: 0.1,
         };
     }
 }
@@ -57,9 +58,12 @@ pub struct Stick {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CollisionSetup;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PhysicsSet;
+
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(FixedPreUpdate, (reset_forces));
+        app.add_systems(FixedPreUpdate, (reset_forces, reset_collisions));
         app.add_systems(
             Startup,
             (
@@ -67,9 +71,14 @@ impl Plugin for PhysicsPlugin {
                 (build_collision_tree).in_set(CollisionSetup),
             ),
         );
+
+        app.add_systems(Update, adjust_power_system);
         app.add_systems(
             FixedUpdate,
-            (apply_gravity.before(run_sub_steps), run_sub_steps),
+            (
+                apply_gravity.before(run_sub_steps),
+                run_sub_steps.in_set(PhysicsSet),
+            ),
         );
         app.insert_resource(CollisionWorld { kd_tree: None });
 
@@ -80,7 +89,8 @@ impl Plugin for PhysicsPlugin {
                 update_verlet_position,
                 stick_constraints,
                 static_collision_system, // collision_system,
-                mouse_constraint_system,
+                mouse_constraint_system.before(stick_constraints),
+                constant_friction_system.after(stick_constraints),
             ),
         );
     }
@@ -413,7 +423,11 @@ pub struct Collision {
 #[derive(Component)]
 pub struct TrackCollision {
     pub collisions: HashMap<Entity, Collision>,
+    pub last: HashMap<Entity, Collision>,
 }
+
+#[derive(Component)]
+pub struct ConstantFriction;
 
 //returns doesCollide, error-vector, normal-vector
 
@@ -588,7 +602,8 @@ fn reset_forces(mut verlet_query: Query<(&mut VerletObject)>) {
 
 fn reset_collisions(mut collision_query: Query<(&mut TrackCollision)>) {
     for (mut col) in collision_query.iter_mut() {
-        col.collisions.clear();
+        col.last = std::mem::take(&mut col.collisions);
+        // col.collisions.clear();
     }
 }
 
@@ -606,6 +621,25 @@ fn apply_constraints(mut verlet_query: Query<&mut VerletObject>) {
         // if (dirr.length() > radius) {
         //     verlet_object.position_current = origin + dirr.normalize() * radius;
         // }
+    }
+}
+
+fn constant_friction_system(
+    mut verlet_query: Query<
+        (
+            &mut VerletObject,
+            &Collider,
+            &TrackCollision,
+            &mut Transform,
+        ),
+        With<ConstantFriction>,
+    >,
+) {
+    for (mut verlet_object, _collider, track_collision, mut transform) in verlet_query.iter_mut() {
+        //using last collisions to avoid inconsistent friction due to jitter
+        for col in &track_collision.last {
+            apply_friction(col.1.normal, &mut verlet_object);
+        }
     }
 }
 
@@ -631,6 +665,22 @@ fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut 
             obj1.position_current += diff.normalize() * err * (ma / (ma + mb));
             obj2.position_current -= diff.normalize() * err * (mb / (ma + mb));
         }
+    }
+}
+
+fn adjust_power_system(
+    mut evr_motion: EventReader<MouseMotion>,
+    mut rope_holder_query: Query<&mut RopeHolder>,
+) {
+    let mut mouse_move: Vec2 = Vec2::ZERO;
+    for ev in evr_motion.read() {
+        mouse_move += ev.delta;
+    }
+
+    let strength = 0.25.lerp(0.5, (mouse_move.length() / 10.0).min(1.0));
+
+    for (mut rope_holder) in rope_holder_query.iter_mut() {
+        rope_holder.power = strength;
     }
 }
 
@@ -669,9 +719,9 @@ fn mouse_constraint_system(
             }
             let diff_norm = diff.clone().normalize();
 
-            obj2.position_current += diff_norm * diff.length().min(0.5) * 0.95;
+            obj2.position_current += diff_norm * diff.length().min(rope_holer.power) * 0.95;
 
-            obj1.position_current -= diff_norm * diff.length().min(0.5) * 0.05;
+            obj1.position_current -= diff_norm * diff.length().min(rope_holer.power) * 0.05;
 
             let hand_diff = obj2.position_current - obj1.position_current;
             let hand_diff_norm = hand_diff.clone().normalize();

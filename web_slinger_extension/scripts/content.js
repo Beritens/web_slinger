@@ -111,6 +111,17 @@ function getElAtPoint(x, y) {
     }
 }
 
+function parseColor(input) {
+    const arr = input.split("(")[1].split(")")[0].split(",");
+    if (arr.length < 3) {
+        return { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+    }
+    else if (arr.length == 3) {
+        return { r: Number(arr[0]), g: Number(arr[1]), b: Number(arr[2]), a: 1.0 };
+    }
+    return { r: Number(arr[0]), g: Number(arr[1]), b: Number(arr[2]), a: Number(arr[3]) };
+}
+
 (async () => {
 
     window.get_colliders = function () {
@@ -148,6 +159,10 @@ function getElAtPoint(x, y) {
 
             let range = document.createRange();
             if (text && text.trim() && text.trim().length > 0) {
+                const color_string = getComputedStyle(node.parentElement).color;
+                const color_values = parseColor(color_string);
+
+                console.log(color_values);
                 for (let i = 0; i < text.length; i++) {
                     let char = text[i];
                     if (!char.trim()) continue;
@@ -156,7 +171,14 @@ function getElAtPoint(x, y) {
                     const rect = range.getBoundingClientRect();
                     // rects.push(rect);
                     if (rect.width > 0 && rect.height > 0) { // Ensure valid rectangles
-                        colliders.push({ top: rect.top, bottom: rect.bottom, right: rect.right + scrollbarWidth, left: rect.left + scrollbarWidth });
+                        colliders.push({
+                            top: rect.top,
+                            bottom: rect.bottom,
+                            right: rect.right + scrollbarWidth,
+                            left: rect.left + scrollbarWidth,
+                            letter: char,
+                            color: color_values
+                        });
                     }
                     // colliders.push({ top: rect.top, bottom: rect.bottom, right: rect.right, left: rect.left });
                 }

@@ -1,9 +1,12 @@
 mod collider_import;
+mod color_picker;
 mod physics;
 
 use crate::collider_import::CollisionImportPlugin;
+use crate::color_picker::{ColorPickerPlugin, GlobalColor};
 use crate::physics::{
-    Collider, PhysicsPlugin, Shape, StaticCollider, Stick, SubStepSchedule, VerletObject,
+    Collider, ConstantFriction, PhysicsPlugin, Shape, StaticCollider, Stick, SubStepSchedule,
+    TrackCollision, VerletObject,
 };
 use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
@@ -15,6 +18,7 @@ use bevy::prelude::{
 };
 use bevy::sprite::Sprite;
 use bevy::utils::default;
+use bevy::utils::hashbrown::HashMap;
 use bevy::window::{CompositeAlphaMode, PrimaryWindow, WindowLevel, WindowPlugin};
 use bevy::DefaultPlugins;
 use bevy_wasm_window_resize::WindowResizePlugin;
@@ -34,6 +38,7 @@ fn main() {
         }),
         ..default()
     }));
+    app.add_plugins(ColorPickerPlugin);
     app.add_systems(Startup, setup);
     app.add_plugins(WindowResizePlugin);
     app.add_plugins(CollisionImportPlugin);
@@ -56,6 +61,7 @@ struct Player;
 struct RopeHolder {
     last_pos: Vec2,
     hand: Entity,
+    power: f32,
 }
 
 fn align_camera_origin(
@@ -73,7 +79,7 @@ fn align_camera_origin(
     transform.translation.y = -window.height() / 2.0;
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, global_color: Res<GlobalColor>) {
     let mut camera = Camera2d;
 
     commands.spawn((Camera2d));
@@ -87,10 +93,15 @@ fn setup(mut commands: Commands) {
             connections: vec![],
         },
         Collider {
-            shape: Shape::Circle { radius: 2.0 },
+            shape: Shape::Circle { radius: 4.0 },
             layer: 2,
             layer_mask: 1,
         },
+        TrackCollision {
+            collisions: HashMap::new(),
+            last: HashMap::new(),
+        },
+        ConstantFriction,
         VerletObject {
             fixed: false,
             position_old: p,
@@ -99,18 +110,24 @@ fn setup(mut commands: Commands) {
             friction: 0.8,
             ..default()
         },
-        Sprite::from_color(Color::BLACK, Vec2::splat(8.0)),
+        Sprite::from_color(global_color.color, Vec2::splat(8.0)),
     ));
     let hand_ent = hand.id();
 
     commands.spawn((
         Transform::from_xyz(p.x, p.y, 0.0),
+        Player,
+        TrackCollision {
+            collisions: Default::default(),
+            last: Default::default(),
+        },
         Collider {
             shape: Shape::Circle { radius: 8.0 },
             layer: 2,
             layer_mask: 1,
         },
         RopeHolder {
+            power: 0.0,
             hand: hand_ent,
             last_pos: Vec2::new(0.0, 0.0),
         },
@@ -121,7 +138,7 @@ fn setup(mut commands: Commands) {
             acceleration: Vec2::ZERO,
             ..default()
         },
-        Sprite::from_color(Color::BLACK, Vec2::splat(16.0)),
+        Sprite::from_color(global_color.color, Vec2::splat(16.0)),
     ));
     // let first_ent_id = first_ent.id();
     // last_ent = Some(first_ent_id);
@@ -239,6 +256,7 @@ fn spawn_rope_system(
     mut commands: Commands,
     spawner_query: Query<(&RopeSpawner, Entity)>,
     mut shooter_query: Query<&mut RopeShooter>,
+    global_color: Res<GlobalColor>,
 ) {
     for (rope_spawner, entity) in spawner_query.iter() {
         let diff = rope_spawner.end - rope_spawner.start;
@@ -264,7 +282,7 @@ fn spawn_rope_system(
                     acceleration: Vec2::ZERO,
                     ..default()
                 },
-                Sprite::from_color(Color::BLACK, Vec2::splat(4.0)),
+                Sprite::from_color(global_color.color, Vec2::splat(4.0)),
             ));
             let new_ent = new.id();
             if let Some(last) = last_ent {
