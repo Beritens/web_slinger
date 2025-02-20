@@ -5,8 +5,8 @@ use bevy::input::mouse::MouseMotion;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{
     Camera, Commands, Component, Entity, EventReader, FixedPreUpdate, FloatExt, GlobalTransform,
-    IntoSystemConfigs, Query, Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Transform,
-    Update, Window, With, Without, World,
+    IntoSystemConfigs, Query, Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Time,
+    Transform, Update, Window, With, Without, World,
 };
 use bevy::utils::HashMap;
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,7 @@ impl Plugin for PhysicsPlugin {
             ),
         );
 
-        app.add_systems(Update, adjust_power_system);
+        // app.add_systems(Update, adjust_power_system);
         app.add_systems(
             FixedUpdate,
             (
@@ -113,6 +113,29 @@ pub struct AABB {
     pub size: Vec2,
 }
 
+pub fn line_line_intersection(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2, a_inf: bool) -> (bool, f32) {
+    let d0 = (a2 - a1);
+    let d1 = (b2 - b1);
+
+    let a = d0.dot(d0);
+    let b = d0.dot(d1);
+    let c = d1.dot(d1);
+
+    let d = (d0.dot(a1 - b1));
+    let e = (d1.dot(a1 - b1));
+
+    let num = a * c - b * b;
+    if num.abs() < 1e-6 {
+        return (false, f32::INFINITY);
+    }
+
+    let s = (b * e - c * d) / (num);
+    let t = (a * e - b * d) / (num);
+    if (s >= 0.0 && (s <= 1.0 || a_inf) && t >= 0.0 && t <= 1.0) {
+        return (true, s);
+    }
+    return (false, f32::INFINITY);
+}
 impl AABB {
     fn intersects(&self, other: &AABB) -> bool {
         let min_x_a = self.pos.x;
@@ -129,6 +152,34 @@ impl AABB {
             && max_x_a >= min_x_b
             && min_y_a <= max_y_b
             && max_y_a >= min_y_b);
+    }
+    fn intersect_ray(&self, ray: &Ray) -> (bool, f32) {
+        let min_x = self.pos.x;
+        let min_y = self.pos.y;
+        let max_x = self.pos.x + self.size.x;
+        let max_y = self.pos.y + self.size.y;
+
+        let cor_a = Vec2::new(min_x, min_y);
+        let cor_b = Vec2::new(min_x, max_y);
+        let cor_c = Vec2::new(max_x, max_y);
+        let cor_d = Vec2::new(max_x, min_y);
+
+        let (a_hit, a_dist) =
+            line_line_intersection(ray.origin, ray.origin + ray.direction, cor_a, cor_b, true);
+
+        let (b_hit, b_dist) =
+            line_line_intersection(ray.origin, ray.origin + ray.direction, cor_b, cor_c, true);
+
+        let (c_hit, c_dist) =
+            line_line_intersection(ray.origin, ray.origin + ray.direction, cor_c, cor_d, true);
+
+        let (d_hit, d_dist) =
+            line_line_intersection(ray.origin, ray.origin + ray.direction, cor_d, cor_a, true);
+
+        return (
+            a_hit || b_hit || c_hit || d_hit,
+            a_dist.min(b_dist).min(c_dist).min(d_dist),
+        );
     }
 }
 pub struct KDNode {
@@ -311,22 +362,44 @@ fn display_collision_tree(mut commands: Commands, col_world: Res<CollisionWorld>
     }
 }
 
-fn find_collision_entities(bounding_box: &AABB, tree: &Option<Arc<Mutex<KDNode>>>) -> Vec<Entity> {
-    let mut colliders: Vec<Entity> = vec![];
+fn find_collision_entities(
+    bounding_box: &AABB,
+    tree: &Option<Arc<Mutex<KDNode>>>,
+    colliders: &mut Vec<Entity>,
+) {
     if let Some(node) = tree {
         let node = node.lock().unwrap();
         if (!bounding_box.intersects(&node.bounding_box)) {
-            return colliders;
+            return;
         }
-        let colsl = find_collision_entities(bounding_box, &node.left_node.clone());
-        let colsr = find_collision_entities(bounding_box, &node.right_node.clone());
-        colliders.extend(colsl);
-        colliders.extend(colsr);
+        find_collision_entities(bounding_box, &node.left_node.clone(), colliders);
+        find_collision_entities(bounding_box, &node.right_node.clone(), colliders);
+        colliders.extend(&node.objects);
+    }
+}
+
+pub struct Ray {
+    pub origin: Vec2,
+    pub direction: Vec2,
+}
+
+fn find_ray_collision_entities(
+    ray: &Ray,
+    tree: &Option<Arc<Mutex<KDNode>>>,
+    colliders: &mut Vec<(Entity, f32)>,
+) {
+    if let Some(node) = tree {
+        let node = node.lock().unwrap();
+        let (possible_hit, dist) = node.bounding_box.intersect_ray(ray);
+        if (!possible_hit) {
+            return;
+        }
+        find_ray_collision_entities(ray, &node.left_node.clone(), colliders);
+        find_ray_collision_entities(ray, &node.right_node.clone(), colliders);
         for &object in &node.objects {
-            colliders.push(object);
+            colliders.push((object, dist));
         }
     }
-    return colliders;
 }
 
 fn static_collision_system(
@@ -338,8 +411,9 @@ fn static_collision_system(
     static_collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
 ) {
     for (collider_a, mut verlet_object_a, mut tracker) in collider_query.iter_mut() {
-        let bounding_box: AABB = collider_a.getBoundingBox(verlet_object_a.position_current);
-        let colliders = find_collision_entities(&bounding_box, &kd_tree.kd_tree);
+        let bounding_box: AABB = collider_a.get_bounding_box(verlet_object_a.position_current);
+        let mut colliders = vec![];
+        find_collision_entities(&bounding_box, &kd_tree.kd_tree, &mut colliders);
         for col_ent in colliders {
             if let Ok((collider_b, verlet_object_b, ent)) = static_collider_query.get(col_ent) {
                 let (collides, err, norm) =
@@ -399,7 +473,16 @@ pub struct Collider {
 }
 
 impl Collider {
-    fn getBoundingBox(&self, pos: Vec2) -> AABB {
+    fn intersect_ray(&self, ray: &Ray, pos: Vec2) -> (bool, f32) {
+        match self.shape {
+            Shape::Box { width, height } => return self.get_bounding_box(pos).intersect_ray(ray),
+
+            Shape::Circle { radius } => {
+                return (false, 0.0);
+            }
+        }
+    }
+    fn get_bounding_box(&self, pos: Vec2) -> AABB {
         match self.shape {
             Shape::Box { width, height } => {
                 return AABB {
@@ -669,6 +752,7 @@ fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut 
 }
 
 fn adjust_power_system(
+    time: Res<Time>,
     mut evr_motion: EventReader<MouseMotion>,
     mut rope_holder_query: Query<&mut RopeHolder>,
 ) {
@@ -677,10 +761,13 @@ fn adjust_power_system(
         mouse_move += ev.delta;
     }
 
-    let strength = 0.25.lerp(0.5, (mouse_move.length() / 10.0).min(1.0));
+    let strength = 0.25.lerp(
+        0.5,
+        (mouse_move.length() * 0.01 / time.delta_secs()).min(1.0),
+    );
 
     for (mut rope_holder) in rope_holder_query.iter_mut() {
-        rope_holder.power = strength;
+        rope_holder.power = 0.5;
     }
 }
 
@@ -719,9 +806,9 @@ fn mouse_constraint_system(
             }
             let diff_norm = diff.clone().normalize();
 
-            obj2.position_current += diff_norm * diff.length().min(rope_holer.power) * 0.95;
+            obj2.position_current += diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.95;
 
-            obj1.position_current -= diff_norm * diff.length().min(rope_holer.power) * 0.05;
+            obj1.position_current -= diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.05;
 
             let hand_diff = obj2.position_current - obj1.position_current;
             let hand_diff_norm = hand_diff.clone().normalize();
@@ -738,4 +825,43 @@ fn mouse_constraint_system(
             // obj2.position_current += diff / 2.0;
         }
     }
+}
+
+pub fn raycast(
+    ray: &Ray,
+    collider_query: &Query<(&Collider, &VerletObject)>,
+    collision_world: &Res<CollisionWorld>,
+) -> Option<(f32, Entity)> {
+    let mut objects: Vec<(Entity, f32)> = vec![];
+    find_ray_collision_entities(ray, &collision_world.kd_tree, &mut objects);
+    if objects.len() == 0 {
+        return None;
+    }
+
+    objects.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+    let mut curr_ent: Option<Entity> = None;
+    let mut cur_dist = f32::INFINITY;
+
+    for i in 0..objects.len() {
+        let (ent, dist) = objects[i];
+        if dist > cur_dist {
+            break;
+        }
+        if let Ok((collider, verlet_obj)) = collider_query.get(ent) {
+            let (hit, hit_dist) = collider.intersect_ray(ray, verlet_obj.position_current);
+            if (!hit) {
+                continue;
+            }
+            if (hit_dist > cur_dist) {
+                continue;
+            }
+            cur_dist = hit_dist;
+            curr_ent = Some(ent);
+        }
+    }
+    if let Some(ent) = curr_ent {
+        return Some((cur_dist, ent));
+    }
+    return None;
 }

@@ -5,8 +5,8 @@ mod physics;
 use crate::collider_import::CollisionImportPlugin;
 use crate::color_picker::{ColorPickerPlugin, GlobalColor};
 use crate::physics::{
-    Collider, ConstantFriction, PhysicsPlugin, Shape, StaticCollider, Stick, SubStepSchedule,
-    TrackCollision, VerletObject,
+    raycast, Collider, Collision, CollisionWorld, ConstantFriction, PhysicsPlugin, Ray, Shape,
+    StaticCollider, Stick, SubStepSchedule, TrackCollision, VerletObject,
 };
 use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
@@ -127,7 +127,7 @@ fn setup(mut commands: Commands, global_color: Res<GlobalColor>) {
             layer_mask: 1,
         },
         RopeHolder {
-            power: 0.0,
+            power: 0.4,
             hand: hand_ent,
             last_pos: Vec2::new(0.0, 0.0),
         },
@@ -327,7 +327,10 @@ fn shoot_rope_system(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut player_query: Query<(&VerletObject, &mut RopeShooter, Entity)>,
+    player_query: Query<(&VerletObject, &RopeHolder)>,
+    mut hand_query: Query<(&VerletObject, &mut RopeShooter)>,
+    collision_world: Res<CollisionWorld>,
+    collider_query: Query<(&Collider, &VerletObject)>,
 ) {
     let mut clear = false;
     let mut shoot = false;
@@ -359,26 +362,38 @@ fn shoot_rope_system(
     let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else {
         return;
     };
-    for (verlet_object, mut shooter, entity) in player_query.iter_mut() {
-        if (clear) {
-            for con in shooter.connections.iter() {
-                commands.entity(*con).despawn();
+    for (player_object, rope_shooter) in player_query.iter() {
+        let entity = rope_shooter.hand;
+        if let Ok((verlet_object, mut shooter)) = hand_query.get_mut(entity) {
+            if (clear) {
+                for con in shooter.connections.iter() {
+                    commands.entity(*con).despawn();
+                }
+                shooter.connections.clear();
             }
-            shooter.connections.clear();
-        }
-        if (shoot) {
-            commands.spawn(
-                (RopeSpawner {
-                    start: verlet_object.position_current,
-                    end: point,
-                    attached_start: Some(entity),
-                    start_length: 0.5,
-                    attached_end: None,
-                    end_length: 0.0,
-                    end_fixed: true,
-                    shooter: entity,
-                }),
-            );
+            if (shoot) {
+                let ray = Ray {
+                    origin: verlet_object.position_current,
+                    direction: (point - player_object.position_current).normalize(),
+                };
+                let hit = raycast(&ray, &collider_query, &collision_world);
+                if let Some(hit) = hit {
+                    let pos = ray.origin + hit.0 * ray.direction;
+                    commands.spawn(
+                        (RopeSpawner {
+                            start: verlet_object.position_current,
+                            end: pos,
+                            attached_start: Some(entity),
+                            start_length: 0.5,
+                            attached_end: None,
+                            end_length: 0.0,
+                            end_fixed: true,
+                            shooter: entity,
+                        }),
+                    );
+                    println!("{}", hit.0);
+                }
+            }
         }
     }
 }
