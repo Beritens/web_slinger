@@ -13,8 +13,8 @@ use bevy::color::Color;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::{
     App, ButtonInput, Camera, Camera2d, Changed, ClearColor, Commands, Component, Entity,
-    GlobalTransform, MouseButton, PluginGroup, Query, Res, Single, Transform, Update, Vec2, Vec3,
-    Window, With, Without, World,
+    GlobalTransform, IntoSystemConfigs, MouseButton, PluginGroup, Query, Res, ResMut, Resource,
+    Single, Transform, Update, Vec2, Vec3, Window, With, Without, World,
 };
 use bevy::sprite::Sprite;
 use bevy::utils::default;
@@ -24,6 +24,8 @@ use bevy::DefaultPlugins;
 use bevy_wasm_window_resize::WindowResizePlugin;
 use std::process::id;
 use std::slice::Windows;
+use std::sync::{Arc, Mutex};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 fn main() {
     println!("Web_Slinger activated");
@@ -49,8 +51,14 @@ fn main() {
     app.add_systems(FixedUpdate, (follow_mouse_system));
     app.add_systems(
         Update,
-        (align_camera_origin, shoot_rope_system, spawn_rope_system),
+        (
+            update_scroll_pos.before(align_camera_origin),
+            align_camera_origin,
+            shoot_rope_system,
+            spawn_rope_system,
+        ),
     );
+    app.insert_resource(ScrollPosition { x: 0, y: 0 });
     app.run();
 }
 
@@ -66,6 +74,7 @@ struct RopeHolder {
 
 fn align_camera_origin(
     windows: Query<&Window>,
+    scroll_position: Res<ScrollPosition>,
     mut transforms: Query<&mut Transform, With<Camera>>,
 ) {
     let Ok(window) = windows.get_single() else {
@@ -75,8 +84,8 @@ fn align_camera_origin(
         return;
     };
 
-    transform.translation.x = window.width() / 2.0;
-    transform.translation.y = -window.height() / 2.0;
+    transform.translation.x = window.width() / 2.0 + scroll_position.x as f32;
+    transform.translation.y = -window.height() / 2.0 - scroll_position.y as f32;
 }
 
 fn setup(mut commands: Commands, global_color: Res<GlobalColor>) {
@@ -395,5 +404,34 @@ fn shoot_rope_system(
                 }
             }
         }
+    }
+}
+
+#[derive(Resource)]
+struct ScrollPosition {
+    x: i32,
+    y: i32,
+}
+
+static SCROLL_Y: once_cell::sync::Lazy<Arc<Mutex<i32>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(0)));
+static SCROLL_X: once_cell::sync::Lazy<Arc<Mutex<i32>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(0)));
+#[wasm_bindgen]
+pub fn set_scroll_pos(scroll_y: i32, scroll_x: i32) {
+    if let Ok(mut y) = SCROLL_Y.lock() {
+        *y = scroll_y;
+    }
+    if let Ok(mut x) = SCROLL_X.lock() {
+        *x = scroll_x;
+    }
+}
+
+fn update_scroll_pos(mut pos_res: ResMut<ScrollPosition>) {
+    if let Ok(x) = SCROLL_X.lock() {
+        pos_res.x = x.clone();
+    }
+    if let Ok(y) = SCROLL_Y.lock() {
+        pos_res.y = y.clone();
     }
 }

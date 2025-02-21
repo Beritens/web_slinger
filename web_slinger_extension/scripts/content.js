@@ -42,10 +42,10 @@ document.head.appendChild(styleSheet);
 function isBehindOtherElement(element) {
     const boundingRect = element.getBoundingClientRect()
     // adjust coordinates to get more accurate results
-    const left = boundingRect.left + 5
-    const right = boundingRect.right - 5
-    const top = boundingRect.top + 5
-    const bottom = boundingRect.bottom - 5
+    const left = boundingRect.left + 5 + window.scrollX;
+    const right = boundingRect.right - 5 + window.scrollX;
+    const top = boundingRect.top + 5 + window.scrollY;
+    const bottom = boundingRect.bottom - 5 + window.scrollY;
 
     // if (!element.contains(document.elementFromPoint(left, top))) return true
     // if (!element.contains(document.elementFromPoint(right, top))) return true
@@ -53,22 +53,18 @@ function isBehindOtherElement(element) {
     // if (!element.contains(document.elementFromPoint(right, bottom))) return true
 
     if (element.contains(getElAtPoint(left, top))) {
-        console.log(element)
         return false;
 
     }
     if (element.contains(getElAtPoint(right, top))) {
-        console.log(element)
         return false;
 
     }
     if (element.contains(getElAtPoint(left, bottom))) {
-        console.log(element)
         return false;
 
     }
     if (element.contains(getElAtPoint(right, bottom))) {
-        console.log(element)
         return false;
 
     }
@@ -77,38 +73,32 @@ function isBehindOtherElement(element) {
 }
 
 function getElAtPoint(x, y) {
-    let caretPos = document.caretPositionFromPoint(x, y);
+    window.scrollTo(x - 100, y - 100);
+    newX = x - window.scrollX;
+    newY = y - window.scrollY;
+    return document.elementFromPoint(newX, newY);
+    // let caretPos = document.caretPositionFromPoint(x, y);
 
-    if (!caretPos) return; // No range found (shouldn't happen, but safety check)
+    // if (!caretPos) return; 
 
-    let node = caretPos.offsetNode;
+    // let node = caretPos.offsetNode;
 
-    // Ensure we're in a text node
-    if (node.nodeType === Node.TEXT_NODE) {
-        let text = node.textContent;
+    // if (node.nodeType === Node.TEXT_NODE) {
+    //     let text = node.textContent;
 
-        // Create a range for just the single character at this index
-        // let charRange = document.createRange();
-        // charRange.setStart(node, 0);
-        // charRange.setEnd(node, text.length);
+    //     let rect = node.parentElement.getBoundingClientRect();
 
-        // Get the bounding box of the character
-        // let rect = charRange.getBoundingClientRect();
-        let rect = node.parentElement.getBoundingClientRect();
-
-        // Check if the click is actually inside the bounding box
-        if (
-            x < rect.left || x > rect.right ||
-            y < rect.top || y > rect.bottom
-        ) {
-            return null;
-        }
-        // Find the parent element containing this text node
-        let element = node.parentElement;
-        return element
-    } else {
-        return null;
-    }
+    //     if (
+    //         x < rect.left || x > rect.right ||
+    //         y < rect.top || y > rect.bottom
+    //     ) {
+    //         return null;
+    //     }
+    //     let element = node.parentElement;
+    //     return element
+    // } else {
+    //     return null;
+    // }
 }
 
 function parseColor(input) {
@@ -122,9 +112,13 @@ function parseColor(input) {
     return { r: Number(arr[0]), g: Number(arr[1]), b: Number(arr[2]), a: Number(arr[3]) };
 }
 
+
 (async () => {
 
     window.get_colliders = function () {
+        const originalScrollX = window.scrollX;
+        const originalScrollY = window.scrollY;
+
         const gameScreen = document.querySelector('#bevy');
         const originalDisplay = gameScreen.style.display;
         gameScreen.style.display = 'none';
@@ -162,7 +156,6 @@ function parseColor(input) {
                 const color_string = getComputedStyle(node.parentElement).color;
                 const color_values = parseColor(color_string);
 
-                console.log(color_values);
                 for (let i = 0; i < text.length; i++) {
                     let char = text[i];
                     if (!char.trim()) continue;
@@ -172,10 +165,10 @@ function parseColor(input) {
                     // rects.push(rect);
                     if (rect.width > 0 && rect.height > 0) { // Ensure valid rectangles
                         colliders.push({
-                            top: rect.top,
-                            bottom: rect.bottom,
-                            right: rect.right + scrollbarWidth,
-                            left: rect.left + scrollbarWidth,
+                            top: rect.top + window.scrollY,
+                            bottom: rect.bottom + window.scrollY,
+                            right: rect.right + scrollbarWidth + window.scrollX,
+                            left: rect.left + scrollbarWidth + window.scrollX,
                             letter: char,
                             color: color_values
                         });
@@ -187,6 +180,7 @@ function parseColor(input) {
         })
 
         gameScreen.style.display = originalDisplay;
+        window.scrollTo(originalScrollX, originalScrollY);
 
         return colliders;
 
@@ -197,11 +191,33 @@ function parseColor(input) {
         // ];
     };
 
+
     const module = await import(chrome.runtime.getURL("game/out/web_slinger.js"));
 
-    // module.default(); // If it's a named export, change to `module.init();`
-    await module.default(chrome.runtime.getURL("./game/out/web_slinger_bg.wasm")); // If it's a named export, change to `module.init();`
+    addEventListener("scroll", (event) => {
+        if (module.wasm) {
+            module.wasm.set_scroll_pos(window.scrollY, window.scrollX);
+        }
+        // run();
+    });
 
+    const waitForWasm = setInterval(() => {
+        if (module.wasm) {
+            module.wasm.set_scroll_pos(window.scrollY, window.scrollX);
+            clearInterval(waitForWasm); // Stop checking once it's called
+        }
+    }, 10);
+
+    console.log("test");
+    // module.default(); // If it's a named export, change to `module.init();`
+    const wasm = await module.default(chrome.runtime.getURL("./game/out/web_slinger_bg.wasm")); // If it's a named export, change to `module.init();`
+    console.log("test");
+    console.log(wasm);
+
+
+    // async function run() {
+    //     console.log(wasm.greet("Alice")); // Outputs: "Hello, Alice!"
+    // }
 
 
 

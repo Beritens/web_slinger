@@ -4133,6 +4133,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_wasm_window_resize",
+ "once_cell",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
