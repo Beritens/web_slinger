@@ -8,6 +8,7 @@ use bevy::prelude::{
     IntoSystemConfigs, Query, Res, ResMut, Resource, Single, Sprite, Srgba, SystemSet, Time,
     Transform, Update, Window, With, Without, World,
 };
+use bevy::utils::hashbrown::HashSet;
 use bevy::utils::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -420,12 +421,19 @@ fn static_collision_system(
                     calc_collision(&verlet_object_a, &verlet_object_b, collider_a, collider_b);
 
                 if (collides) {
-                    apply_friction(norm, &mut verlet_object_a);
+                    if (!collider_b.trigger) {
+                        //todo: fix double friction
+                        apply_friction(norm, &mut verlet_object_a);
 
-                    verlet_object_a.position_current += err;
+                        verlet_object_a.position_current += err;
+                    }
 
-                    if let Some(mut tracker_a) = tracker.take() {
-                        tracker_a.collisions.insert(ent, Collision { normal: norm });
+                    if let Some(mut tracker_a) = tracker.as_mut() {
+                        if (collider_b.trigger) {
+                            tracker_a.triggers.insert(ent);
+                        } else {
+                            tracker_a.collisions.insert(ent, Collision { normal: norm });
+                        }
                     }
                 }
             }
@@ -470,6 +478,7 @@ pub struct Collider {
     pub shape: Shape,
     pub layer: u32,
     pub layer_mask: u32,
+    pub trigger: bool,
 }
 
 impl Collider {
@@ -506,7 +515,9 @@ pub struct Collision {
 #[derive(Component)]
 pub struct TrackCollision {
     pub collisions: HashMap<Entity, Collision>,
+    pub triggers: HashSet<Entity>,
     pub last: HashMap<Entity, Collision>,
+    pub last_triggers: HashSet<Entity>,
 }
 
 #[derive(Component)]
@@ -594,7 +605,7 @@ fn circle_box_collision(
         }
     }
 
-    return (depth > 0.0, norm * depth, norm);
+    return (depth >= 0.0, norm * depth, norm);
 }
 fn calc_collision(
     a_obj: &VerletObject,
@@ -686,6 +697,7 @@ fn reset_forces(mut verlet_query: Query<(&mut VerletObject)>) {
 fn reset_collisions(mut collision_query: Query<(&mut TrackCollision)>) {
     for (mut col) in collision_query.iter_mut() {
         col.last = std::mem::take(&mut col.collisions);
+        col.last_triggers = std::mem::take(&mut col.triggers);
         // col.collisions.clear();
     }
 }
@@ -849,6 +861,9 @@ pub fn raycast(
             break;
         }
         if let Ok((collider, verlet_obj)) = collider_query.get(ent) {
+            if (collider.trigger) {
+                continue;
+            }
             let (hit, hit_dist) = collider.intersect_ray(ray, verlet_obj.position_current);
             if (!hit) {
                 continue;

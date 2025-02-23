@@ -2,6 +2,7 @@ mod collider_import;
 mod color_picker;
 mod physics;
 mod rope_shooting;
+mod timer;
 
 use crate::collider_import::CollisionImportPlugin;
 use crate::color_picker::{ColorPickerPlugin, GlobalColor};
@@ -10,6 +11,7 @@ use crate::physics::{
     StaticCollider, Stick, SubStepSchedule, TrackCollision, VerletObject,
 };
 use crate::rope_shooting::{RopeShooter, RopeShootingPlugin};
+use crate::timer::TimerPlugin;
 use bevy::app::{FixedUpdate, Startup};
 use bevy::color::Color;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -45,6 +47,7 @@ fn main() {
     app.add_plugins(ColorPickerPlugin);
     app.add_systems(Startup, setup);
     app.add_plugins(WindowResizePlugin);
+    app.add_plugins(TimerPlugin);
     app.add_plugins(CollisionImportPlugin);
     app.add_plugins(PhysicsPlugin);
     app.add_plugins(RopeShootingPlugin);
@@ -103,13 +106,16 @@ fn setup(mut commands: Commands, global_color: Res<GlobalColor>) {
             connections: vec![],
         },
         Collider {
+            trigger: false,
             shape: Shape::Circle { radius: 4.0 },
             layer: 2,
             layer_mask: 1,
         },
         TrackCollision {
+            triggers: Default::default(),
             collisions: HashMap::new(),
             last: HashMap::new(),
+            last_triggers: Default::default(),
         },
         ConstantFriction,
         VerletObject {
@@ -130,8 +136,11 @@ fn setup(mut commands: Commands, global_color: Res<GlobalColor>) {
         TrackCollision {
             collisions: Default::default(),
             last: Default::default(),
+            triggers: Default::default(),
+            last_triggers: Default::default(),
         },
         Collider {
+            trigger: false,
             shape: Shape::Circle { radius: 8.0 },
             layer: 2,
             layer_mask: 1,

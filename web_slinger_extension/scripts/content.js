@@ -124,6 +124,7 @@ function parseColor(input) {
         gameScreen.style.display = 'none';
 
         const textNodes = [];
+        const others = [];
 
         document.querySelectorAll('*').forEach(el => {
             // Ignore non-visible elements
@@ -140,9 +141,17 @@ function parseColor(input) {
                     if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim()) {
                         textNodes.push(node);
                     }
+                    else {
+                        others.push(node);
+                    }
                 });
             }
+            else if (!isBehind && isVisible) {
+                others.push(el);
+            }
         });
+
+        console.log(others);
 
         // const rects = [];
         const colliders = []
@@ -178,6 +187,25 @@ function parseColor(input) {
                 }
 
             }
+        })
+
+        others.forEach(el => {
+            let letter = el.alt;
+            if (letter && (letter.length == 1 || letter.length == 2)) {
+                const color_values = { r: 100, g: 10, b: 75, a: 255 };
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) { // Ensure valid rectangles
+                    colliders.push({
+                        top: rect.top + window.scrollY,
+                        bottom: rect.bottom + window.scrollY,
+                        right: rect.right + scrollbarWidth + window.scrollX,
+                        left: rect.left + scrollbarWidth + window.scrollX,
+                        letter: letter,
+                        color: color_values,
+                    });
+                }
+            }
+
         })
 
         gameScreen.style.display = originalDisplay;

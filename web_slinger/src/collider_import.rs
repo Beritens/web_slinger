@@ -1,5 +1,6 @@
 use crate::physics::{Collider, CollisionSetup, Shape, StaticCollider, VerletObject};
 use crate::rope_shooting::Hookable;
+use crate::timer::{Finish, TimerStarter};
 use bevy::app::{App, FixedUpdate, Plugin, Startup};
 use bevy::color::Srgba;
 use bevy::prelude::{Color, Commands, Component, IntoSystemConfigs, Transform, Vec2};
@@ -21,6 +22,31 @@ impl Plugin for CollisionImportPlugin {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn get_colliders_system(mut commands: Commands) {
+    let timer_pos = Vec2::new(900.0, -275.0);
+    commands.spawn((
+        StaticCollider,
+        Collider {
+            layer: 1,
+            layer_mask: 1,
+            trigger: true,
+            shape: Shape::Box {
+                width: 8.0,
+                height: 8.0,
+            },
+        },
+        TimerStarter,
+        Hookable,
+        VerletObject {
+            fixed: true,
+            position_current: timer_pos,
+            ..default()
+        },
+        Colored {
+            color: Color::BLACK,
+        },
+        Sprite::from_color(Color::BLACK, Vec2::new(16.0, 16.0)),
+        Transform::from_xyz(900.0, -250.0, 1.0),
+    ));
     for i in 0..=5 {
         for j in 0..=5 {
             let pos = Vec2::new(400.0 + (i as f32 * 100.0), -300.0 - (j as f32 * 100.0));
@@ -29,6 +55,7 @@ fn get_colliders_system(mut commands: Commands) {
                 Collider {
                     layer: 1,
                     layer_mask: 1,
+                    trigger: false,
                     shape: Shape::Box {
                         width: 15.0,
                         height: 15.0,
@@ -73,6 +100,7 @@ fn get_colliders_system(mut commands: Commands) {
             blue: collider.color.b / 255.0,
             alpha: 1.0,
         };
+        let is_trigger = collider.letter == "⏱" || collider.letter == "🏁";
 
         let pos = Vec2::new(mid_x, mid_y);
         let mut col_ent = commands.spawn((
@@ -80,6 +108,7 @@ fn get_colliders_system(mut commands: Commands) {
             Collider {
                 layer: 1,
                 layer_mask: 1,
+                trigger: is_trigger,
                 shape: Shape::Box {
                     width: width,
                     height: height,
@@ -99,6 +128,13 @@ fn get_colliders_system(mut commands: Commands) {
 
         if !contains_special_chars(collider.letter.as_str()) {
             col_ent.insert(Hookable);
+        }
+        if collider.letter == "⏱" {
+            col_ent.insert(TimerStarter);
+        }
+
+        if collider.letter == "🏁" {
+            col_ent.insert(Finish);
         }
     }
 }

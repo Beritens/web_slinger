@@ -49,6 +49,7 @@ fn spawn_rope_system(
             let new = commands.spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 Collider {
+                    trigger: false,
                     shape: Shape::Circle { radius: 4.0 },
                     layer: 1,
                     layer_mask: 1,
