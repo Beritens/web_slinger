@@ -1,10 +1,12 @@
 use crate::physics::{Collider, CollisionSetup, Shape, StaticCollider, VerletObject};
+use crate::rope_shooting::Hookable;
 use bevy::app::{App, FixedUpdate, Plugin, Startup};
 use bevy::color::Srgba;
 use bevy::prelude::{Color, Commands, Component, IntoSystemConfigs, Transform, Vec2};
 use bevy::reflect::erased_serde::__private::serde::{Deserialize, Serialize};
 use bevy::sprite::Sprite;
 use bevy::utils::default;
+use regex::Regex;
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::JsValue;
@@ -32,6 +34,7 @@ fn get_colliders_system(mut commands: Commands) {
                         height: 15.0,
                     },
                 },
+                Hookable,
                 VerletObject {
                     fixed: true,
                     position_current: pos,
@@ -51,7 +54,10 @@ fn get_colliders_system(mut commands: Commands) {
 pub struct Colored {
     pub color: Color,
 }
-
+fn contains_special_chars(s: &str) -> bool {
+    let re = Regex::new(r"[^a-zA-Z0-9]").unwrap();
+    re.is_match(s)
+}
 #[cfg(target_arch = "wasm32")]
 fn get_colliders_system(mut commands: Commands) {
     let colliders = get_colliders_rust();
@@ -69,7 +75,7 @@ fn get_colliders_system(mut commands: Commands) {
         };
 
         let pos = Vec2::new(mid_x, mid_y);
-        commands.spawn((
+        let mut col_ent = commands.spawn((
             StaticCollider,
             Collider {
                 layer: 1,
@@ -90,6 +96,10 @@ fn get_colliders_system(mut commands: Commands) {
             // Sprite::from_color(Color::BLACK, Vec2::new(width * 2.0, height * 2.0)),
             Transform::from_xyz(pos.x, pos.y, 1.0),
         ));
+
+        if !contains_special_chars(collider.letter.as_str()) {
+            col_ent.insert(Hookable);
+        }
     }
 }
 

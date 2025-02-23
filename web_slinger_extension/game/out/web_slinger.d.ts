@@ -1,10 +1,12 @@
 /* tslint:disable */
 /* eslint-disable */
+export function set_scroll_pos(scroll_y: number, scroll_x: number): void;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly set_scroll_pos: (a: number, b: number) => void;
   readonly main: (a: number, b: number) => number;
   readonly __externref_table_alloc: () => number;
   readonly __wbindgen_export_1: WebAssembly.Table;
@@ -14,11 +16,11 @@ export interface InitOutput {
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export_6: WebAssembly.Table;
   readonly _dyn_core__ops__function__FnMut__A____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hf189fb6a3d98da5e: (a: number, b: number, c: number) => void;
-  readonly closure3058_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure3433_externref_shim: (a: number, b: number, c: any) => void;
   readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h470a4240525235be: (a: number, b: number) => void;
-  readonly closure3065_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure3440_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h623d06095faee2b8: (a: number, b: number) => void;
-  readonly closure99752_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure100124_externref_shim: (a: number, b: number, c: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

@@ -73,7 +73,7 @@ function isBehindOtherElement(element) {
 }
 
 function getElAtPoint(x, y) {
-    window.scrollTo(x - 100, y - 100);
+    window.scrollTo({ left: x - 100, top: y - 100, behavior: 'instant' });
     newX = x - window.scrollX;
     newY = y - window.scrollY;
     return document.elementFromPoint(newX, newY);
@@ -155,6 +155,7 @@ function parseColor(input) {
             if (text && text.trim() && text.trim().length > 0) {
                 const color_string = getComputedStyle(node.parentElement).color;
                 const color_values = parseColor(color_string);
+                const fontWeight = getComputedStyle(node.parentElement).fontWeight;
 
                 for (let i = 0; i < text.length; i++) {
                     let char = text[i];
@@ -170,7 +171,7 @@ function parseColor(input) {
                             right: rect.right + scrollbarWidth + window.scrollX,
                             left: rect.left + scrollbarWidth + window.scrollX,
                             letter: char,
-                            color: color_values
+                            color: color_values,
                         });
                     }
                     // colliders.push({ top: rect.top, bottom: rect.bottom, right: rect.right, left: rect.left });
@@ -180,7 +181,8 @@ function parseColor(input) {
         })
 
         gameScreen.style.display = originalDisplay;
-        window.scrollTo(originalScrollX, originalScrollY);
+        window.scrollTo({ left: originalScrollX, top: originalScrollY, behavior: 'instant' });
+        // window.scrollTo(originalScrollX, originalScrollY);
 
         return colliders;
 
