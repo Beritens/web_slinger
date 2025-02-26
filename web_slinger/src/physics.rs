@@ -73,11 +73,14 @@ impl Plugin for PhysicsPlugin {
             ),
         );
 
+        // app.add_systems(Update, (adjust_drag_system,));
         // app.add_systems(Update, adjust_power_system);
         app.add_systems(
             FixedUpdate,
             (
                 apply_gravity.before(run_sub_steps),
+                // apply_drag_adjustment.before(run_sub_steps),
+                // adjust_drag_active_system.after(run_sub_steps),
                 run_sub_steps.in_set(PhysicsSet),
             ),
         );
@@ -92,6 +95,9 @@ impl Plugin for PhysicsPlugin {
                 static_collision_system, // collision_system,
                 mouse_constraint_system.before(stick_constraints),
                 constant_friction_system.after(stick_constraints),
+                cushion_system
+                    .before(static_collision_system)
+                    .after(update_verlet_position),
             ),
         );
     }
@@ -405,13 +411,19 @@ fn find_ray_collision_entities(
 
 fn static_collision_system(
     mut collider_query: Query<
-        (&Collider, &mut VerletObject, Option<&mut TrackCollision>),
+        (
+            &Collider,
+            &mut VerletObject,
+            Option<&mut TrackCollision>,
+            Entity,
+        ),
         Without<StaticCollider>,
     >,
     kd_tree: Res<CollisionWorld>,
+    constant_friction: Query<&ConstantFriction>,
     static_collider_query: Query<(&Collider, &VerletObject, Entity), With<StaticCollider>>,
 ) {
-    for (collider_a, mut verlet_object_a, mut tracker) in collider_query.iter_mut() {
+    for (collider_a, mut verlet_object_a, mut tracker, ent) in collider_query.iter_mut() {
         let bounding_box: AABB = collider_a.get_bounding_box(verlet_object_a.position_current);
         let mut colliders = vec![];
         find_collision_entities(&bounding_box, &kd_tree.kd_tree, &mut colliders);
@@ -423,9 +435,11 @@ fn static_collision_system(
                 if (collides) {
                     if (!collider_b.trigger) {
                         //todo: fix double friction
-                        apply_friction(norm, &mut verlet_object_a);
 
                         verlet_object_a.position_current += err;
+                        if (constant_friction.get(ent)).is_err() {
+                            apply_friction(norm, &mut verlet_object_a);
+                        }
                     }
 
                     if let Some(mut tracker_a) = tracker.as_mut() {
@@ -763,24 +777,78 @@ fn stick_constraints(stick_query: Query<(&Stick)>, mut verlet_query: Query<&mut 
     }
 }
 
-fn adjust_power_system(
-    time: Res<Time>,
-    mut evr_motion: EventReader<MouseMotion>,
-    mut rope_holder_query: Query<&mut RopeHolder>,
+fn cushion_system(
+    mut rope_holder_query: Query<(&mut RopeHolder, &mut VerletObject)>,
+    collider_tacker_query: Query<&TrackCollision>,
 ) {
-    let mut mouse_move: Vec2 = Vec2::ZERO;
-    for ev in evr_motion.read() {
-        mouse_move += ev.delta;
+    for (mut rope_holder, mut verlet_object) in rope_holder_query.iter_mut() {
+        let hand = rope_holder.hand;
+        if let Ok(track_col) = collider_tacker_query.get(hand) {
+            for col in &track_col.last {
+                let norm = col.1.normal;
+                let mut vel = verlet_object.position_current - verlet_object.position_old;
+                let vel_dot = norm.dot(vel);
+                if (vel_dot < 0.0) {
+                    vel -= (norm * vel_dot) * 0.2;
+                    verlet_object.position_old = verlet_object.position_current - vel;
+                }
+            }
+        }
     }
+}
 
-    let strength = 0.25.lerp(
-        0.5,
-        (mouse_move.length() * 0.01 / time.delta_secs()).min(1.0),
-    );
+// #[derive(Component)]
+// pub struct DragAdjustment {
+//     pub base_drag: f32,
+//     pub multiplier: f32,
+//     pub active: bool,
+// }
+//
+// fn apply_drag_adjustment(mut rope_holder_query: Query<(&mut VerletObject, &mut DragAdjustment)>) {
+//     for (mut verlet_object, mut drag_adjustment) in rope_holder_query.iter_mut() {
+//         verlet_object.drag = drag_adjustment.base_drag
+//             * (if drag_adjustment.active {
+//                 drag_adjustment.multiplier
+//             } else {
+//                 1.0
+//             });
+//     }
+// }
+// fn adjust_drag_active_system(
+//     mut rope_holder_query: Query<(&mut RopeHolder, &mut DragAdjustment)>,
+//     collider_tacker_query: Query<&TrackCollision>,
+// ) {
+//     for (mut rope_holder, mut drag_adjustment) in rope_holder_query.iter_mut() {
+//         let hand = rope_holder.hand;
+//         if let Ok(track_col) = collider_tacker_query.get(hand) {
+//             drag_adjustment.active = !track_col.collisions.is_empty();
+//         }
+//     }
+// }
+//
+// fn adjust_drag_system(
+//     time: Res<Time>,
+//     mut evr_motion: EventReader<MouseMotion>,
+//     mut rope_holder_query: Query<(&mut RopeHolder, &mut DragAdjustment)>,
+// ) {
+//     let mut mouse_move: Vec2 = Vec2::ZERO;
+//     for ev in evr_motion.read() {
+//         mouse_move += ev.delta;
+//     }
+//
+//     let drag = 100.0.lerp(
+//         1.0,
+//         (mouse_move.length() * 0.1 / time.delta_secs()).min(1.0),
+//     );
+//
+//     for (mut rope_holder, mut drag_adjustment) in rope_holder_query.iter_mut() {
+//         drag_adjustment.multiplier = drag;
+//     }
+// }
 
-    for (mut rope_holder) in rope_holder_query.iter_mut() {
-        rope_holder.power = 0.5;
-    }
+#[derive(Component)]
+pub struct Position {
+    pub pos: Vec2,
 }
 
 fn mouse_constraint_system(
@@ -788,6 +856,7 @@ fn mouse_constraint_system(
     windows: Query<&Window>,
     mut player_query: Query<(&mut RopeHolder, Entity)>,
     mut verlet_object_query: Query<&mut VerletObject>,
+    mut pos_query: Query<&Position>,
 ) {
     let (camera, camera_transform) = *camera_query;
 
@@ -805,34 +874,40 @@ fn mouse_constraint_system(
         if let Ok([mut obj1, mut obj2]) =
             verlet_object_query.get_many_mut([entity, rope_holer.hand])
         {
-            let mouse_pos = point.unwrap_or(rope_holer.last_pos);
-            let diff_obj2 = (mouse_pos - obj2.position_current);
-            // let target_position = obj1.position_current - diff_obj2;
-            // let diff_to_target = target_position - obj1.position_current;
-            let length = diff_obj2.length().min(64.0);
-            let ideal_pos = obj1.position_current + diff_obj2.normalize() * length;
-            // let ideal_pos = obj1.position_current - Vec2::Y * 50.0;
-            let diff = ideal_pos - obj2.position_current;
-            if (diff.length() == 0.0) {
-                continue;
-            }
-            let diff_norm = diff.clone().normalize();
+            if let Ok(pos) = pos_query.get(rope_holer.mouse) {
+                let mouse_pos = pos.pos;
+                let diff_obj2 = (mouse_pos - obj2.position_current);
+                // let target_position = obj1.position_current - diff_obj2;
+                // let diff_to_target = target_position - obj1.position_current;
+                if (diff_obj2.length() == 0.0) {
+                    continue;
+                }
+                let length = diff_obj2.length().min(64.0);
+                let ideal_pos = obj1.position_current + diff_obj2.normalize() * length;
+                // let ideal_pos = obj1.position_current - Vec2::Y * 50.0;
+                let diff = ideal_pos - obj2.position_current;
+                if (diff.length() == 0.0) {
+                    continue;
+                }
+                let diff_norm = diff.clone().normalize();
 
-            obj2.position_current += diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.95;
+                obj2.position_current +=
+                    diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.95;
 
-            obj1.position_current -= diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.05;
+                obj1.position_current -=
+                    diff_norm * (diff.length() / 8.0).min(rope_holer.power) * 0.05;
 
-            let hand_diff = obj2.position_current - obj1.position_current;
-            let hand_diff_norm = hand_diff.clone().normalize();
-            let err = 64.0 - hand_diff.length();
-            if (err < 0.0) {
-                obj1.position_current -= hand_diff_norm * err * 0.05;
-                obj2.position_current += hand_diff_norm * err * 0.95;
-            }
-            rope_holer.last_pos = mouse_pos;
+                let hand_diff = obj2.position_current - obj1.position_current;
+                let hand_diff_norm = hand_diff.clone().normalize();
+                let err = 64.0 - hand_diff.length();
+                if (err < 0.0) {
+                    obj1.position_current -= hand_diff_norm * err * 0.05;
+                    obj2.position_current += hand_diff_norm * err * 0.95;
+                }
 
-            if (obj1.position_current.is_nan()) {
-                println!("nan");
+                if (obj1.position_current.is_nan()) {
+                    println!("nan");
+                }
             }
             // obj2.position_current += diff / 2.0;
         }

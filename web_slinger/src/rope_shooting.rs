@@ -1,7 +1,7 @@
 use crate::collider_import::CollisionImportPlugin;
 use crate::color_picker::GlobalColor;
 use crate::physics::{
-    raycast, Collider, CollisionSetup, CollisionWorld, Ray, Shape, Stick, VerletObject,
+    raycast, Collider, CollisionSetup, CollisionWorld, Position, Ray, Shape, Stick, VerletObject,
 };
 use crate::{align_camera_origin, update_scroll_pos, RopeHolder};
 use bevy::app::{App, Plugin, Startup, Update};
@@ -106,11 +106,10 @@ pub struct Hookable;
 
 fn shoot_rope_system(
     mut commands: Commands,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    windows: Query<&Window>,
     buttons: Res<ButtonInput<MouseButton>>,
     player_query: Query<(&VerletObject, &RopeHolder)>,
     mut hand_query: Query<(&VerletObject, &mut RopeShooter)>,
+    mouse_pos_query: Query<&Position>,
     collision_world: Res<CollisionWorld>,
     collider_query: Query<(&Collider, &VerletObject)>,
     hookable_query: Query<&Hookable>,
@@ -127,26 +126,10 @@ fn shoot_rope_system(
     if (!clear && !shoot) {
         return;
     }
-    let (camera, camera_transform) = *camera_query;
-
-    let Ok(window) = windows.get_single() else {
-        return;
-    };
-
-    let cursor_position = if let Some(pos) = window.cursor_position() {
-        pos
-    } else if !shoot {
-        Vec2::ZERO
-    } else {
-        return;
-    };
 
     // Calculate a world position based on the cursor's position.
-    let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else {
-        return;
-    };
-    for (player_object, rope_shooter) in player_query.iter() {
-        let entity = rope_shooter.hand;
+    for (player_object, rope_holder) in player_query.iter() {
+        let entity = rope_holder.hand;
         if let Ok((verlet_object, mut shooter)) = hand_query.get_mut(entity) {
             if (clear) {
                 for con in shooter.connections.iter() {
@@ -155,6 +138,10 @@ fn shoot_rope_system(
                 shooter.connections.clear();
             }
             if (shoot) {
+                let Ok(mouse_pos) = mouse_pos_query.get(rope_holder.mouse) else {
+                    continue;
+                };
+                let point = mouse_pos.pos;
                 let ray = Ray {
                     origin: verlet_object.position_current,
                     direction: (point - player_object.position_current).normalize(),

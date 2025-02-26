@@ -47,6 +47,31 @@ fn get_colliders_system(mut commands: Commands) {
         Sprite::from_color(Color::BLACK, Vec2::new(16.0, 16.0)),
         Transform::from_xyz(900.0, -250.0, 1.0),
     ));
+    let finish_pos = Vec2::new(500.0, -275.0);
+    commands.spawn((
+        StaticCollider,
+        Collider {
+            layer: 1,
+            layer_mask: 1,
+            trigger: true,
+            shape: Shape::Box {
+                width: 8.0,
+                height: 8.0,
+            },
+        },
+        Finish,
+        Hookable,
+        VerletObject {
+            fixed: true,
+            position_current: finish_pos,
+            ..default()
+        },
+        Colored {
+            color: Color::BLACK,
+        },
+        Sprite::from_color(Color::BLACK, Vec2::new(16.0, 16.0)),
+        Transform::from_xyz(900.0, -250.0, 1.0),
+    ));
     for i in 0..=5 {
         for j in 0..=5 {
             let pos = Vec2::new(400.0 + (i as f32 * 100.0), -300.0 - (j as f32 * 100.0));
@@ -122,7 +147,7 @@ fn get_colliders_system(mut commands: Commands) {
             Colored {
                 color: Color::Srgba(color),
             },
-            // Sprite::from_color(Color::BLACK, Vec2::new(width * 2.0, height * 2.0)),
+            // Sprite::from_color(Color::WHITE, Vec2::new(width * 2.0, height * 2.0)),
             Transform::from_xyz(pos.x, pos.y, 1.0),
         ));
 
